@@ -151,4 +151,4 @@ A arquitetura L0/L1/L2 e os testes longos das Macroetapas 38–40 continuam obri
 - [x] Riscos e próximos gates registrados.
 - [ ] Smoke visual manual, bloqueado pelo ambiente nesta execução.
 
-A2 está concluído documentalmente. A próxima fronteira é A3: proteger as fronteiras arquiteturais verificadas e transformar as decisões desta auditoria em testes automáticos, sem ainda implementar gameplay histórico.
+A2 permanece como a auditoria de referência. A3 já transformou suas fronteiras em testes automáticos; a próxima fronteira é A4, `worldSeed` e streams RNG independentes.

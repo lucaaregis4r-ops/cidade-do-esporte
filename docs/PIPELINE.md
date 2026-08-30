@@ -1,7 +1,7 @@
 # Pipeline e fluxos reais
 
 Atualizado em: 30/08/2026
-Escopo observado: Etapa 0 + baseline técnico A1 + auditoria A2
+Escopo observado: Etapa 0 + baseline A1 + auditoria A2 + proteção arquitetural A3
 
 Este documento registra somente fluxos executáveis ou práticas atualmente sustentadas pelos arquivos do projeto. Itens futuros ficam marcados como pendentes e não são apresentados como existentes.
 
@@ -33,8 +33,9 @@ Checagens reais:
 4. o SHA-256 atual do plano coincide com o registrado em `docs/CONTEXTO.md`;
 5. o contexto contém uma linha de status para cada macroetapa;
 6. a Macroetapa 1 está em andamento e as demais não foram antecipadas;
-7. A2 está concluído no plano Alpha A e no relatório de auditoria;
-8. o commit Cimulity fixado existe no histórico e o remote `upstream` aponta para a URL registrada.
+7. A2 e A3 estão concluídos no plano Alpha A e nos artefatos correspondentes;
+8. o teste de fronteiras arquiteturais existe;
+9. o commit Cimulity fixado existe no histórico e o remote `upstream` aponta para a URL registrada.
 
 Saída:
 
@@ -56,7 +57,7 @@ Ler regras e plano completo
 
 Regras:
 
-- A2 foi concluído sem modificar o código importado; A3 é o primeiro pacote autorizado a adicionar proteções arquiteturais.
+- A2 e A3 foram concluídos; alterações futuras precisam preservar o teste de fronteiras antes de avançar.
 - Novos comandos só entram aqui depois de existirem e terem sido executados com sucesso no projeto.
 - Falha ou ausência de teste deve ser registrada em `docs/CONTEXTO.md`, nunca omitida.
 
@@ -127,6 +128,24 @@ O audit é uma leitura de risco, não uma autorização para correção automát
 ## Runtime oficial decidido
 
 Node 24 LTS é o alvo do projeto derivado. Node 26.3.0 é o ambiente local observado e aprovou o baseline; Node 20 continua apenas na CI upstream e deve ser substituído em uma alteração controlada. Enquanto a configuração ainda não foi atualizada, divergência entre esses runtimes permanece risco conhecido.
+
+## Pipeline existente: proteção arquitetural A3
+
+Comando direcionado:
+
+```powershell
+npm test -- game/architecture.test.ts
+```
+
+O arquivo `game/architecture.test.ts` lê os arquivos TypeScript/TSX de produção e verifica:
+
+1. matriz permitida de imports entre App, Core, Engine, Input, Render, Tools e Types;
+2. React/Next restritos ao App;
+3. PixiJS restrito ao Render;
+4. ausência de chamadas diretas aos mutadores explícitos de `World` em Render, Input e Tools;
+5. descoberta das sete camadas, evitando aprovação vazia por erro de varredura.
+
+Resultado A3 em 30/08/2026: 1 arquivo e 4 testes direcionados aprovados. O gate também integra `npm test`; após a mudança, o pipeline completo aprovou lint, 92 arquivos/1.884 testes e o build de 7 páginas estáticas.
 
 ## Pipeline upstream existente: GitHub Pages
 

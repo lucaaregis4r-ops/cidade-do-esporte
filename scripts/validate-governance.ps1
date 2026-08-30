@@ -77,7 +77,7 @@ if ((Test-Path -LiteralPath $planPath -PathType Leaf) -and (Test-Path -LiteralPa
     }
 
     if ($context -notmatch '(?m)^\| 1 \| .+ \| EM ANDAMENTO \|$') {
-        $errors.Add('A Macroetapa 1 deve estar EM ANDAMENTO enquanto A3–A10 permanecem pendentes.')
+        $errors.Add('A Macroetapa 1 deve estar EM ANDAMENTO enquanto A4–A10 permanecem pendentes.')
     }
 
     if ($context -match '(?m)^\| (?:[2-9]|[1-3][0-9]|4[0-2]) \| .+ \| (?:EM ANDAMENTO|CONCLUÍDA) \|$') {
@@ -93,9 +93,18 @@ if ((Test-Path -LiteralPath $alphaAPath -PathType Leaf) -and (Test-Path -Literal
         $errors.Add('O plano Alpha A não registra A2 como CONCLUÍDO.')
     }
 
+    if ($alphaA -notmatch '(?m)^\| A3 \| .+ \| A2 \| CONCLUÍDO \|$') {
+        $errors.Add('O plano Alpha A não registra A3 como CONCLUÍDO.')
+    }
+
     if ($cimulityAudit -notmatch '(?m)^Status: \*\*A2 CONCLUÍDO\*\*$') {
         $errors.Add('A auditoria Cimulity não registra o gate A2 concluído.')
     }
+}
+
+$architectureTestPath = Join-Path $projectRoot 'game/architecture.test.ts'
+if (-not (Test-Path -LiteralPath $architectureTestPath -PathType Leaf)) {
+    $errors.Add('O teste de fronteiras arquiteturais da A3 está ausente.')
 }
 
 $expectedUpstream = 'https://github.com/zeikar/cimulity.git'

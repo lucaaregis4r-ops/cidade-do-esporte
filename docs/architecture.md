@@ -276,3 +276,19 @@ The render layer derives smooth slope geometry from shared vertex heights: `tile
 - **Ref guards**: prevent duplicate session creation within a single mounted effect path
 - **Proper cleanup**: All PixiJS resources destroyed on unmount
 - **No memory leaks**: Verified with hot reload testing
+
+## Enforced Layer Boundaries
+
+`game/architecture.test.ts` scans every production TypeScript/TSX import under `app/` and `game/`. It turns the audited dependency graph into an executable contract:
+
+```text
+App    → App, Engine, Input, Tools, Render, Core, Types
+Engine → Engine, Input, Tools, Render, Core, Types
+Input  → Input, Tools, Render, Core, Types
+Tools  → Tools, Core, Types
+Render → Render, Core, Types
+Core   → Core, Types
+Types  → Types
+```
+
+The same guard keeps React and Next inside App, keeps PixiJS inside Render, and rejects direct calls to explicit `World` mutators from Render, Input, or Tools. `GameSession` remains the composition root and `CommandDispatcher` remains the tool-command mutation boundary. Tests and declarations are excluded from the production dependency scan.

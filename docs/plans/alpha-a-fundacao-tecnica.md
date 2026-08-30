@@ -15,7 +15,7 @@ Macroetapas 1, 2, 3 e 37; fundações antecipadas das Macroetapas 39 e 40 apenas
 | A0 | Governança, contexto e pipeline anti-deriva | — | CONCLUÍDO |
 | A1 | Base Cimulity incorporada com baseline reproduzível | A0 | CONCLUÍDO |
 | A2 | Auditoria completa PRESERVAR/ADAPTAR/REMOVER | A1 | CONCLUÍDO |
-| A3 | Fronteiras arquiteturais protegidas por testes | A2 | NÃO INICIADO |
+| A3 | Fronteiras arquiteturais protegidas por testes | A2 | CONCLUÍDO |
 | A4 | `worldSeed` e streams RNG independentes | A3 | NÃO INICIADO |
 | A5 | Proibição verificável de aleatoriedade direta no core | A4 | NÃO INICIADO |
 | A6 | `HistoricalClock` com cadências e velocidades | A4 | NÃO INICIADO |
@@ -54,7 +54,7 @@ Macroetapas 1, 2, 3 e 37; fundações antecipadas das Macroetapas 39 e 40 apenas
 
 ## Gates seguintes
 
-- A2 foi concluído sem alteração do código upstream; A3 é a próxima fronteira.
+- A2 e A3 foram concluídos; A4 é a próxima fronteira.
 - A4 só começa depois de RNG/save atuais serem localizados no código.
 - A10 só conclui com duas execuções equivalentes comparadas automaticamente.
 
@@ -83,3 +83,12 @@ Macroetapas 1, 2, 3 e 37; fundações antecipadas das Macroetapas 39 e 40 apenas
 - `npm audit --json`: 13 achados triados, sem correção automática.
 - Node 24 LTS definido como alvo do projeto derivado; CI e dependências serão alterados somente em pacote técnico controlado.
 - Smoke visual manual pendente por bloqueio do ambiente; build e testes de renderização permanecem verdes.
+
+## Evidência de encerramento do A3
+
+- `game/architecture.test.ts` lê os imports reais de todos os arquivos TypeScript/TSX de produção em `app/` e `game/`.
+- O teste protege as dependências permitidas entre App, Core, Engine, Input, Render, Tools e Types.
+- React/Next ficam restritos ao shell App; PixiJS fica restrito ao Render.
+- Render, Input e Tools falham se chamarem diretamente mutadores explícitos de `World`.
+- Gate direcionado: 1 arquivo e 4 testes aprovados.
+- Pipeline completo: lint aprovado, 92 arquivos e 1.884 testes aprovados, build e 7 páginas estáticas aprovados.

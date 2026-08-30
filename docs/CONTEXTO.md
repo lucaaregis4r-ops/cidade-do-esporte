@@ -1,7 +1,7 @@
 # Contexto e estado atual
 
 Atualizado em: 30/08/2026
-Estado global: **ETAPA 0, A1 E A2 CONCLUÍDOS; MACROETAPA 1 EM ANDAMENTO**
+Estado global: **ETAPA 0 E PACOTES A1–A3 CONCLUÍDOS; MACROETAPA 1 EM ANDAMENTO**
 
 ## Identidade canônica
 
@@ -24,6 +24,8 @@ SHA-256 vigente do plano: `5E658B040064F2D00989A382FBA71E444D6410C7A0AC57CDDF5F4
 
 A auditoria A2 confirmou `GameSession` como raiz de composição, com React como shell, Input/Tools convertendo interação em comandos, Core contendo a simulação e Render lendo o Core por PixiJS. `CommandDispatcher.applyCommands` é a via de mutação causada por ferramentas; `World.tick`, hidratação, reset e seed de desenvolvimento são as demais vias observadas. Não foram encontradas inversões de camada em código de produção. GameLoop, mapa, câmera, projeção, picking e conectividade formam a fundação preservada; World, entidades, valor da terra, trabalho, tráfego, economia, RNG, save e shell serão adaptados; poderes municipais serão removidos da agência normal do jogador.
 
+A3 transformou essa arquitetura auditada em contrato executável. `game/architecture.test.ts` verifica imports de todos os arquivos de produção, dependências permitidas entre sete camadas, isolamento de React/Next e PixiJS e ausência de chamadas diretas aos mutadores explícitos de `World` em Render, Input e Tools.
+
 ## Dependências vigentes
 
 Base npm `cimulity@0.1.0`, lockfile v3: Next.js 16.1.1, React/React DOM 19.2.3, PixiJS 8.15.0, TypeScript 5.9.3, Vitest 4.1.6, ESLint 9.39.2 e Tailwind CSS 4.1.18. Ambiente local verificado: Node v26.3.0 e npm 11.16.0; o workflow upstream usa Node 20, já fora de suporte. Node 24 LTS é o alvo oficial decidido para o projeto derivado, ainda não aplicado à configuração.
@@ -44,6 +46,7 @@ Base npm `cimulity@0.1.0`, lockfile v3: Next.js 16.1.1, React/React DOM 19.2.3, 
 | D-0010 | DECIDIDO | Preservar infraestrutura espacial/loop, adaptar modelos de domínio e remover poderes municipais da agência normal do jogador. | Classificação por implementação e testes concluída em A2. |
 | D-0011 | DECIDIDO | Toda mudança de schema de save derivado terá migration explícita; rejeição silenciosa de versões não é aceitável. | O save v19 atual rejeita versões anteriores e conflita com a Macroetapa 37. |
 | D-0012 | DECIDIDO | Atualizar dependências e CI de forma controlada, sem `audit fix --force`. | Audit A2 encontrou 13 achados; Next 16.1.1 tem atualização não-major indicada. |
+| D-0013 | DECIDIDO | A matriz de dependências auditada em A2 é um contrato automático de teste. | A3 adicionou varredura estrutural de todos os imports de produção. |
 
 ## Mapa das macroetapas
 
@@ -122,9 +125,18 @@ Observação: a Macroetapa 42 reorganiza o trabalho em Alpha A–I e lista 45 it
 - Nenhum arquivo de código upstream foi alterado.
 - Smoke visual manual não executado por bloqueio do ambiente; limitação registrada.
 
+## A3 concluído
+
+- Teste estrutural criado para App, Core, Engine, Input, Render, Tools e Types.
+- Dependências proibidas agora falham com arquivo, camada de origem, camada de destino e import responsável.
+- React/Next fora do App e PixiJS fora do Render são rejeitados.
+- Chamadas diretas de mutadores explícitos de `World` em Render, Input ou Tools são rejeitadas.
+- Nenhum comportamento de gameplay, RNG, relógio ou save foi antecipado.
+- Lint, suíte completa e build aprovados.
+
 ## Próxima fronteira autorizada pelo plano
 
-Pacote A3 — proteger por testes as fronteiras arquiteturais verificadas em A2. O objetivo é impedir dependências proibidas, mutações fora dos pontos explícitos e regressões na separação entre simulação e apresentação, sem implementar ainda gameplay histórico.
+Pacote A4 — implementar `worldSeed` e streams RNG independentes e serializáveis, mantendo a mesma seed isolada por domínio. A3 bloqueia regressões de camada durante essa mudança.
 
 ## Pendências
 
@@ -165,3 +177,7 @@ Pacote A3 — proteger por testes as fronteiras arquiteturais verificadas em A2.
 - `npm audit --json`: 13 achados — 1 baixo, 1 moderado, 11 altos, 0 críticos; nenhuma alteração automática.
 - Busca de aleatoriedade direta em produção: nenhuma chamada a `Math.random()`.
 - Smoke visual manual: NÃO EXECUTADO — servidor local bloqueado pelo limite de uso do ambiente.
+- A3 direcionado (`npm test -- game/architecture.test.ts`): APROVADO — 1 arquivo, 4 testes.
+- `npm run lint` após A3: APROVADO.
+- `npm test` após A3: APROVADO — 92 arquivos e 1.884 testes em 78,06 s.
+- `npm run build` após A3: APROVADO — TypeScript e 7 páginas estáticas; a primeira tentativa no sandbox falhou com `EPERM` em `.next/trace`, e a repetição autorizada fora do sandbox passou.
