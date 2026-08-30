@@ -1,7 +1,7 @@
 # Pipeline e fluxos reais
 
 Atualizado em: 30/08/2026
-Escopo observado: Etapa 0 + baseline técnico A1
+Escopo observado: Etapa 0 + baseline técnico A1 + auditoria A2
 
 Este documento registra somente fluxos executáveis ou práticas atualmente sustentadas pelos arquivos do projeto. Itens futuros ficam marcados como pendentes e não são apresentados como existentes.
 
@@ -33,7 +33,8 @@ Checagens reais:
 4. o SHA-256 atual do plano coincide com o registrado em `docs/CONTEXTO.md`;
 5. o contexto contém uma linha de status para cada macroetapa;
 6. a Macroetapa 1 está em andamento e as demais não foram antecipadas;
-7. o commit Cimulity fixado existe no histórico e o remote `upstream` aponta para a URL registrada.
+7. A2 está concluído no plano Alpha A e no relatório de auditoria;
+8. o commit Cimulity fixado existe no histórico e o remote `upstream` aponta para a URL registrada.
 
 Saída:
 
@@ -55,7 +56,7 @@ Ler regras e plano completo
 
 Regras:
 
-- `docs/00-cimulity-audit.md` já existe e A2 bloqueia qualquer modificação do código importado.
+- A2 foi concluído sem modificar o código importado; A3 é o primeiro pacote autorizado a adicionar proteções arquiteturais.
 - Novos comandos só entram aqui depois de existirem e terem sido executados com sucesso no projeto.
 - Falha ou ausência de teste deve ser registrada em `docs/CONTEXTO.md`, nunca omitida.
 
@@ -90,6 +91,43 @@ Resultados do baseline A1 em 30/08/2026:
 
 O npm reportou 13 vulnerabilidades e scripts de instalação pendentes para `sharp` e `unrs-resolver`. `npm audit fix` e `npm audit fix --force` não fazem parte do pipeline e não devem ser executados sem triagem.
 
+## Pipeline existente: auditoria técnica A2
+
+Comandos executados:
+
+```powershell
+npm test -- --coverage
+npm audit --json
+```
+
+Verificações estáticas complementares:
+
+- imports de produção entre Core, Render, Tools, Input e Engine;
+- chamadas diretas a `Math.random()` no código de produção;
+- vias de mutação do mundo;
+- versão e conteúdo do save;
+- workflow, runtime e configuração de exportação estática.
+
+Resultados em 30/08/2026:
+
+| Verificação | Resultado |
+|---|---|
+| Testes com cobertura | 91 arquivos; 1.880 testes aprovados |
+| Statements | 95,60% |
+| Branches | 90,66% |
+| Functions | 99,00% |
+| Lines | 98,49% |
+| Audit de dependências | 1 baixo, 1 moderado, 11 altos, 0 críticos |
+| Aleatoriedade direta em produção | nenhuma chamada a `Math.random()` |
+| Inversões de camada em produção | nenhuma encontrada nas fronteiras auditadas |
+| Smoke visual manual | não executado; servidor bloqueado pelo limite do ambiente |
+
+O audit é uma leitura de risco, não uma autorização para correção automática. Mudanças em dependências exigem pacote próprio com lockfile revisado, lint, testes e build.
+
+## Runtime oficial decidido
+
+Node 24 LTS é o alvo do projeto derivado. Node 26.3.0 é o ambiente local observado e aprovou o baseline; Node 20 continua apenas na CI upstream e deve ser substituído em uma alteração controlada. Enquanto a configuração ainda não foi atualizada, divergência entre esses runtimes permanece risco conhecido.
+
 ## Pipeline upstream existente: GitHub Pages
 
 `.github/workflows/deploy.yml` roda em push para `main` e manualmente. Ele usa Node 20, executa `npm ci` e `npm run build`, publica `out` no GitHub Pages. Ele não executa lint nem testes; portanto não é, sozinho, gate suficiente para este projeto derivado.
@@ -98,8 +136,8 @@ O npm reportou 13 vulnerabilidades e scripts de instalação pendentes para `sha
 
 | Pipeline | Estado | Condição para documentar como real |
 |---|---|---|
-| Runtime oficial do projeto derivado | PENDENTE | A2 decidir Node suportado e matriz mínima |
-| Triagem de segurança das dependências | PENDENTE | A2 investigar 13 achados sem atualização cega |
+| Aplicação do runtime Node 24 LTS | PENDENTE | Atualizar configuração e CI, depois validar a matriz |
+| Remediação das dependências triadas | PENDENTE | Atualização controlada, sem `--force`, seguida por pipeline completo |
 | Testes de determinismo | PENDENTE | Macroetapa 2 implementada |
 | Simulação longa/100 seeds | PENDENTE | Macroetapa 39 implementada |
 | CI derivada com lint + testes | PENDENTE | Criar após A2; workflow upstream só faz build/deploy |

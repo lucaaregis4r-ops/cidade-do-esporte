@@ -38,6 +38,8 @@ foreach ($relativePath in $requiredFiles) {
 
 $planPath = Join-Path $projectRoot 'PLANO MESTRE DE IMPLEMENTAÇÃO.md'
 $contextPath = Join-Path $projectRoot 'docs/CONTEXTO.md'
+$alphaAPath = Join-Path $projectRoot 'docs/plans/alpha-a-fundacao-tecnica.md'
+$cimulityAuditPath = Join-Path $projectRoot 'docs/00-cimulity-audit.md'
 
 if ((Test-Path -LiteralPath $planPath -PathType Leaf) -and (Test-Path -LiteralPath $contextPath -PathType Leaf)) {
     $plan = Get-Content -LiteralPath $planPath -Raw
@@ -75,11 +77,24 @@ if ((Test-Path -LiteralPath $planPath -PathType Leaf) -and (Test-Path -LiteralPa
     }
 
     if ($context -notmatch '(?m)^\| 1 \| .+ \| EM ANDAMENTO \|$') {
-        $errors.Add('A Macroetapa 1 deve estar EM ANDAMENTO enquanto A2–A10 permanecem pendentes.')
+        $errors.Add('A Macroetapa 1 deve estar EM ANDAMENTO enquanto A3–A10 permanecem pendentes.')
     }
 
     if ($context -match '(?m)^\| (?:[2-9]|[1-3][0-9]|4[0-2]) \| .+ \| (?:EM ANDAMENTO|CONCLUÍDA) \|$') {
         $errors.Add('Uma macroetapa posterior foi antecipada antes da conclusão da Macroetapa 1.')
+    }
+}
+
+if ((Test-Path -LiteralPath $alphaAPath -PathType Leaf) -and (Test-Path -LiteralPath $cimulityAuditPath -PathType Leaf)) {
+    $alphaA = Get-Content -LiteralPath $alphaAPath -Raw
+    $cimulityAudit = Get-Content -LiteralPath $cimulityAuditPath -Raw
+
+    if ($alphaA -notmatch '(?m)^\| A2 \| .+ \| A1 \| CONCLUÍDO \|$') {
+        $errors.Add('O plano Alpha A não registra A2 como CONCLUÍDO.')
+    }
+
+    if ($cimulityAudit -notmatch '(?m)^Status: \*\*A2 CONCLUÍDO\*\*$') {
+        $errors.Add('A auditoria Cimulity não registra o gate A2 concluído.')
     }
 }
 

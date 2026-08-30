@@ -1,7 +1,7 @@
 # Contexto e estado atual
 
 Atualizado em: 30/08/2026
-Estado global: **ETAPA 0 E PACOTE A1 CONCLUÍDOS; MACROETAPA 1 EM ANDAMENTO**
+Estado global: **ETAPA 0, A1 E A2 CONCLUÍDOS; MACROETAPA 1 EM ANDAMENTO**
 
 ## Identidade canônica
 
@@ -22,11 +22,11 @@ SHA-256 vigente do plano: `5E658B040064F2D00989A382FBA71E444D6410C7A0AC57CDDF5F4
 
 ## Arquitetura vigente
 
-A base importada verifica a direção `React Shell → Input → Engine/Tools → Core → Render`. `CommandDispatcher.applyCommands` é a via de mutação causada por ferramentas; `World.tick`, hidratação, reset e seed de desenvolvimento são outras vias documentadas. `GameSession` compõe Pixi/input/engine e `worldStore` mantém o mundo. A auditoria A2 ainda precisa confirmar isso no código e classificar cada subsistema.
+A auditoria A2 confirmou `GameSession` como raiz de composição, com React como shell, Input/Tools convertendo interação em comandos, Core contendo a simulação e Render lendo o Core por PixiJS. `CommandDispatcher.applyCommands` é a via de mutação causada por ferramentas; `World.tick`, hidratação, reset e seed de desenvolvimento são as demais vias observadas. Não foram encontradas inversões de camada em código de produção. GameLoop, mapa, câmera, projeção, picking e conectividade formam a fundação preservada; World, entidades, valor da terra, trabalho, tráfego, economia, RNG, save e shell serão adaptados; poderes municipais serão removidos da agência normal do jogador.
 
 ## Dependências vigentes
 
-Base npm `cimulity@0.1.0`, lockfile v3: Next.js 16.1.1, React/React DOM 19.2.3, PixiJS 8.15.0, TypeScript 5.9.3, Vitest 4.1.6, ESLint 9.39.2 e Tailwind CSS 4.1.18. Ambiente local verificado: Node v26.3.0 e npm 11.16.0; o workflow upstream usa Node 20.
+Base npm `cimulity@0.1.0`, lockfile v3: Next.js 16.1.1, React/React DOM 19.2.3, PixiJS 8.15.0, TypeScript 5.9.3, Vitest 4.1.6, ESLint 9.39.2 e Tailwind CSS 4.1.18. Ambiente local verificado: Node v26.3.0 e npm 11.16.0; o workflow upstream usa Node 20, já fora de suporte. Node 24 LTS é o alvo oficial decidido para o projeto derivado, ainda não aplicado à configuração.
 
 ## Decisões registradas
 
@@ -40,6 +40,10 @@ Base npm `cimulity@0.1.0`, lockfile v3: Next.js 16.1.1, React/React DOM 19.2.3, 
 | D-0006 | DECIDIDO | Fixar Cimulity no commit `330e59e1...` e manter o remote como `upstream`. | A1.1/A1.2; proveniência registrada. |
 | D-0007 | DECIDIDO | Preservar inglês em código/comentários e português nos documentos canônicos do projeto. | Conciliação entre `CLAUDE.md` e `AGENTS.md`. |
 | D-0008 | DECIDIDO | Não executar `npm audit fix` antes da auditoria A2. | Evitar alterar lockfile e baseline sem avaliar impacto. |
+| D-0009 | DECIDIDO | Adotar Node 24 LTS como runtime oficial do projeto derivado. | Node 20 encerrou suporte; Node 26 local é versão corrente, mas não LTS. |
+| D-0010 | DECIDIDO | Preservar infraestrutura espacial/loop, adaptar modelos de domínio e remover poderes municipais da agência normal do jogador. | Classificação por implementação e testes concluída em A2. |
+| D-0011 | DECIDIDO | Toda mudança de schema de save derivado terá migration explícita; rejeição silenciosa de versões não é aceitável. | O save v19 atual rejeita versões anteriores e conflita com a Macroetapa 37. |
+| D-0012 | DECIDIDO | Atualizar dependências e CI de forma controlada, sem `audit fix --force`. | Audit A2 encontrou 13 achados; Next 16.1.1 tem atualização não-major indicada. |
 
 ## Mapa das macroetapas
 
@@ -108,19 +112,28 @@ Observação: a Macroetapa 42 reorganiza o trabalho em Alpha A–I e lista 45 it
 - Dependências instaladas e baseline verde.
 - Nove planos Alpha criados em `docs/plans/`.
 
+## A2 concluído
+
+- Arquitetura, imports, mutações e fluxos reais verificados no código.
+- Todos os subsistemas exigidos pela Macroetapa 1 classificados com evidência em `docs/00-cimulity-audit.md`.
+- RNG sem estado, save sem migrations, economia municipal e limites de performance registrados como riscos técnicos.
+- Cobertura completa executada: 91 arquivos e 1.880 testes aprovados.
+- Audit de dependências triado sem modificar lockfile.
+- Nenhum arquivo de código upstream foi alterado.
+- Smoke visual manual não executado por bloqueio do ambiente; limitação registrada.
+
 ## Próxima fronteira autorizada pelo plano
 
-Pacote A2 — auditoria completa da Macroetapa 1. Deve mapear as áreas exigidas, verificar dependências reais entre camadas e classificar cada subsistema em PRESERVAR, ADAPTAR ou REMOVER DA AGÊNCIA DO JOGADOR. Nenhum código upstream pode ser alterado antes desse gate.
+Pacote A3 — proteger por testes as fronteiras arquiteturais verificadas em A2. O objetivo é impedir dependências proibidas, mutações fora dos pontos explícitos e regressões na separação entre simulação e apresentação, sem implementar ainda gameplay histórico.
 
 ## Pendências
 
 - Ainda não existe um remote `origin` pertencente ao projeto; somente `upstream` oficial.
-- A auditoria profunda A2 e a classificação dos subsistemas estão pendentes.
-- A compatibilidade oficial do projeto derivado com Node 20 versus Node 26 precisa ser decidida no A2.
-- As 13 vulnerabilidades reportadas pelo npm precisam ser triadas sem atualização cega.
+- A configuração ainda não aplica Node 24 LTS nem atualiza a CI derivada.
+- As 13 vulnerabilidades triadas precisam de atualização controlada e nova validação; nenhuma correção foi aplicada em A2.
 - Scripts de instalação de `sharp` e `unrs-resolver` ficaram pendentes segundo o mecanismo `allow-scripts` do npm 11.
 - Nenhum dado histórico foi pesquisado ou calibrado.
-- Critérios de aceitação detalhados por macroetapa ainda dependem da auditoria técnica e da decomposição progressiva.
+- Critérios de aceitação detalhados das etapas futuras ainda dependem da decomposição progressiva de cada Alpha.
 
 ## Riscos atuais
 
@@ -133,8 +146,8 @@ Pacote A2 — auditoria completa da Macroetapa 1. Deve mapear as áreas exigidas
 | Calibração histórica pode virar falsa precisão | ALTO | Fontes, hipóteses e limitações obrigatórias |
 | Simular 50 anos pode exceder orçamento de performance | ALTO | L0/L1/L2 e testes longos previstos, com métricas desde cedo |
 | Documentação pode divergir do código | MÉDIO | Atualização no mesmo trabalho e validação de governança |
-| 13 vulnerabilidades npm reportadas no baseline | ALTO | Triar no A2; não aplicar `--force` sem testes |
-| Node local 26 difere do Node 20 da CI upstream | MÉDIO | Definir runtime suportado e executar matriz mínima no A2 |
+| 13 vulnerabilidades npm reportadas no baseline | ALTO | Remediar em atualização controlada; não aplicar `--force` sem testes |
+| Node local 26 difere do alvo Node 24 e da CI Node 20 fora de suporte | MÉDIO | Aplicar Node 24 e executar matriz no próximo pacote técnico controlado |
 | Não existe remote `origin` próprio | MÉDIO | Criar somente quando houver repositório do projeto definido |
 
 ## Última verificação
@@ -148,3 +161,7 @@ Pacote A2 — auditoria completa da Macroetapa 1. Deve mapear as áreas exigidas
 - Avisos não bloqueantes: depreciação `module.register()` no Node 26 e indisponibilidade de `localStorage` no ambiente de teste.
 - Integridade upstream: APROVADA — nenhuma diferença em código, configuração, lockfile, workflow ou licença contra o commit fixado.
 - `./scripts/validate-governance.ps1`: APROVADO — plano, nove Alphas, contexto e proveniência sincronizados.
+- `npm test -- --coverage`: APROVADO — 91 arquivos, 1.880 testes; 95,60% statements, 90,66% branches, 99,00% functions e 98,49% lines.
+- `npm audit --json`: 13 achados — 1 baixo, 1 moderado, 11 altos, 0 críticos; nenhuma alteração automática.
+- Busca de aleatoriedade direta em produção: nenhuma chamada a `Math.random()`.
+- Smoke visual manual: NÃO EXECUTADO — servidor local bloqueado pelo limite de uso do ambiente.

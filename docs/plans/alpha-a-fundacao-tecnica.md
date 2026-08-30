@@ -14,7 +14,7 @@ Macroetapas 1, 2, 3 e 37; fundações antecipadas das Macroetapas 39 e 40 apenas
 |---|---|---|---|
 | A0 | Governança, contexto e pipeline anti-deriva | — | CONCLUÍDO |
 | A1 | Base Cimulity incorporada com baseline reproduzível | A0 | CONCLUÍDO |
-| A2 | Auditoria completa PRESERVAR/ADAPTAR/REMOVER | A1 | NÃO INICIADO |
+| A2 | Auditoria completa PRESERVAR/ADAPTAR/REMOVER | A1 | CONCLUÍDO |
 | A3 | Fronteiras arquiteturais protegidas por testes | A2 | NÃO INICIADO |
 | A4 | `worldSeed` e streams RNG independentes | A3 | NÃO INICIADO |
 | A5 | Proibição verificável de aleatoriedade direta no core | A4 | NÃO INICIADO |
@@ -54,7 +54,7 @@ Macroetapas 1, 2, 3 e 37; fundações antecipadas das Macroetapas 39 e 40 apenas
 
 ## Gates seguintes
 
-- A2 bloqueia qualquer alteração do código upstream.
+- A2 foi concluído sem alteração do código upstream; A3 é a próxima fronteira.
 - A4 só começa depois de RNG/save atuais serem localizados no código.
 - A10 só conclui com duas execuções equivalentes comparadas automaticamente.
 
@@ -73,3 +73,13 @@ Macroetapas 1, 2, 3 e 37; fundações antecipadas das Macroetapas 39 e 40 apenas
 - `npm test`: 91 arquivos e 1.880 testes aprovados.
 - `npm run build`: aprovado; 7 páginas estáticas geradas.
 - Ambiente local observado: Node `v26.3.0`, npm `11.16.0`; CI upstream usa Node 20.
+
+## Evidência de encerramento do A2
+
+- Arquitetura, imports e vias de mutação verificados diretamente no código.
+- GameLoop, World, mapa, entidades, valor da terra, vias, trabalho, tráfego, PixiJS, câmera, picking, RNG, save, React e ferramentas classificados.
+- Infraestrutura espacial e loop marcados para PRESERVAR; modelos de domínio para ADAPTAR; poderes municipais para REMOVER DA AGÊNCIA DO JOGADOR.
+- `npm test -- --coverage`: 91 arquivos e 1.880 testes aprovados; 95,60% statements, 90,66% branches, 99,00% functions e 98,49% lines no escopo configurado.
+- `npm audit --json`: 13 achados triados, sem correção automática.
+- Node 24 LTS definido como alvo do projeto derivado; CI e dependências serão alterados somente em pacote técnico controlado.
+- Smoke visual manual pendente por bloqueio do ambiente; build e testes de renderização permanecem verdes.
