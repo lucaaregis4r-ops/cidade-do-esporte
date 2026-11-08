@@ -30,9 +30,9 @@ interface DataViewPanelProps {
 }
 
 const VIEWS: { value: DataView; label: string }[] = [
-  { value: 'none', label: 'None' },
-  { value: 'traffic', label: 'Traffic' },
-  { value: 'jobs', label: 'Jobs' },
+  { value: 'none', label: 'Nenhuma' },
+  { value: 'traffic', label: 'Trânsito' },
+  { value: 'jobs', label: 'Empregos' },
 ];
 
 // Active/inactive button styles mirror the [Stats] button in GameHUD.
@@ -91,7 +91,7 @@ export function DataViewPanel({ active, onSelect }: DataViewPanelProps) {
         top: '64px',
         // Offset left of StatsPanel (right:16px + 252px wide) so both panels
         // can be open at once without overlapping: 16 + 252 + 16px gap = 284px.
-        right: '284px',
+        right: '16px',
         width: '180px',
         padding: '12px',
         backgroundColor: 'rgba(0, 0, 0, 0.85)',
@@ -109,8 +109,12 @@ export function DataViewPanel({ active, onSelect }: DataViewPanelProps) {
           letterSpacing: '1px',
         }}
       >
-        DATA VIEW
+        CAMADAS DA BASE TÉCNICA
       </div>
+
+      <p style={{ color: '#cfcfc5', font: '11px/1.4 Arial, sans-serif', margin: '0 0 10px' }}>
+        Trânsito e empregos pertencem à simulação urbana herdada. Ainda não medem a Cidade de Minas histórica.
+      </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {VIEWS.map(({ value, label }) => (

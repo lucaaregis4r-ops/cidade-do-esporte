@@ -2,19 +2,56 @@ import { describe, it, expect } from 'vitest';
 import { World } from './World';
 import { TileType, createTile } from './Tile';
 import { serializeWorld, deserializeWorldInto, WORLD_SAVE_VERSION } from './mapSerialization';
+import { createClub } from './club/Club';
 
 describe('WORLD_SAVE_VERSION', () => {
-  it('is 19', () => {
-    expect(WORLD_SAVE_VERSION).toBe(19);
+  it('is 25', () => {
+    expect(WORLD_SAVE_VERSION).toBe(25);
   });
 });
 
-describe('v19 serialization', () => {
-  it('WORLD_SAVE_VERSION is 19 and serializeWorld emits vertex-smooth terrain', () => {
+describe('v25 serialization', () => {
+  it('round-trips club state when present, and null when absent', () => {
+    const worldWithoutClub = new World(8, 8, { regenerate: false });
+    expect(worldWithoutClub.getClub()).toBeNull();
+    const serializedNoClub = serializeWorld(worldWithoutClub);
+    const targetNoClub = new World(8, 8, { regenerate: false });
+    expect(deserializeWorldInto(targetNoClub, serializedNoClub)).toBe(true);
+    expect(targetNoClub.getClub()).toBeNull();
+
+    const sampleClub = createClub({
+      id: 'club-test-1',
+      name: 'América Foot-ball Club',
+      shortName: 'América',
+      foundingDate: { year: 1912, month: 4, day: 30 },
+      foundingOrigin: 'students',
+      colors: { primary: '#008000', secondary: '#ffffff' },
+      crestHistory: [{ startYear: 1912, designId: 'crest-v1', changeReason: 'Fundação' }],
+      founders: ['person-p1'],
+      reputation: 20,
+    });
+    worldWithoutClub.setClub(sampleClub);
+    const serializedWithClub = serializeWorld(worldWithoutClub);
+    const targetWithClub = new World(8, 8, { regenerate: false });
+    expect(deserializeWorldInto(targetWithClub, serializedWithClub)).toBe(true);
+    expect(targetWithClub.getClub()).toEqual(sampleClub);
+  });
+  it('round-trips deterministic 1910 foundation, districts and parcels', () => {
+    const source = new World(24, 24, { worldSeed: 'CM-1910-B13-SAVE' });
+    const expected = source.getCityData1910();
+    expect(expected).not.toBeNull();
+    const serialized = serializeWorld(source);
+    const target = new World(24, 24, { regenerate: false });
+    expect(deserializeWorldInto(target, serialized)).toBe(true);
+    expect(target.getCityData1910()).toEqual(expected);
+    expect(serializeWorld(target)).toBe(serialized);
+  });
+
+  it('WORLD_SAVE_VERSION is 25 and serializeWorld emits vertex-smooth terrain', () => {
     const world = new World(4, 4, { regenerate: false });
     const parsed = JSON.parse(serializeWorld(world));
-    expect(WORLD_SAVE_VERSION).toBe(19);
-    expect(parsed.v).toBe(19);
+    expect(WORLD_SAVE_VERSION).toBe(25);
+    expect(parsed.v).toBe(25);
     expect(parsed.terrain.mode).toBe('vertex-smooth');
     expect(parsed.terrain.vertexHeights).toHaveLength(5);
     expect('tileElevations' in parsed.terrain).toBe(false);
@@ -371,6 +408,7 @@ describe('v19 serialization', () => {
       sr: [0, 0, 2, 1],
       ab: false,
     }];
+    base.campaign.nextIds.buildings = 1;
     expect(deserializeWorldInto(new World(4, 4, { regenerate: false }), JSON.stringify(base))).toBe(true);
   });
 
@@ -497,6 +535,7 @@ function makeV12BaseWithPlant() {
   }
   const base = JSON.parse(serializeWorld(srcWorld));
   // Add POWER_PLANT tiles at (2,2),(3,2),(2,3),(3,3)
+  base.campaign.nextIds.structures = 1;
   base.t[2 * W + 2] = TileType.POWER_PLANT;
   base.t[2 * W + 3] = TileType.POWER_PLANT;
   base.t[3 * W + 2] = TileType.POWER_PLANT;
@@ -926,7 +965,7 @@ describe('v16 police station persistence', () => {
 
     const json1 = serializeWorld(src);
     const parsed = JSON.parse(json1);
-    expect(parsed.v).toBe(19);
+    expect(parsed.v).toBe(WORLD_SAVE_VERSION);
 
     const dst = new World(W, W, { regenerate: false });
     expect(deserializeWorldInto(dst, json1)).toBe(true);
@@ -1027,7 +1066,7 @@ describe('v16 fire station persistence', () => {
 
     const json1 = serializeWorld(src);
     const parsed = JSON.parse(json1);
-    expect(parsed.v).toBe(19);
+    expect(parsed.v).toBe(WORLD_SAVE_VERSION);
 
     const dst = new World(W, W, { regenerate: false });
     expect(deserializeWorldInto(dst, json1)).toBe(true);
@@ -1128,7 +1167,7 @@ describe('v16 hospital station persistence', () => {
 
     const json1 = serializeWorld(src);
     const parsed = JSON.parse(json1);
-    expect(parsed.v).toBe(19);
+    expect(parsed.v).toBe(WORLD_SAVE_VERSION);
 
     const dst = new World(W, W, { regenerate: false });
     expect(deserializeWorldInto(dst, json1)).toBe(true);
@@ -1229,7 +1268,7 @@ describe('v16 school station persistence', () => {
 
     const json1 = serializeWorld(src);
     const parsed = JSON.parse(json1);
-    expect(parsed.v).toBe(19);
+    expect(parsed.v).toBe(WORLD_SAVE_VERSION);
 
     const dst = new World(W, W, { regenerate: false });
     expect(deserializeWorldInto(dst, json1)).toBe(true);
@@ -1324,7 +1363,7 @@ describe('v17 park persistence', () => {
 
     const json1 = serializeWorld(src);
     const parsed = JSON.parse(json1);
-    expect(parsed.v).toBe(19);
+    expect(parsed.v).toBe(WORLD_SAVE_VERSION);
 
     const dst = new World(W, W, { regenerate: false });
     expect(deserializeWorldInto(dst, json1)).toBe(true);

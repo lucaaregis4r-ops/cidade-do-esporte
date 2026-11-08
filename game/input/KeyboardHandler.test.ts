@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import { KeyboardHandler } from './KeyboardHandler';
 import { Tool } from '../tools/Tool';
 
-// Local alias for the SpeedTier that KeyboardCallbacks uses internally (1|2|3).
-type SpeedTier = 1 | 2 | 3;
+// Local alias for the canonical historical-campaign speed tiers.
+type SpeedTier = 1 | 2 | 4 | 8;
 
 // Minimal event shape KeyboardHandler reads — only the fields the production code touches.
 type StubKeyEvent = { key: string; target: unknown; preventDefault: () => void };
@@ -47,6 +47,19 @@ function fire(key: string, target: unknown = null, modifiers: { ctrlKey?: boolea
 }
 
 describe('KeyboardHandler', () => {
+  it('keeps municipal editing shortcuts out of the campaign input mode', () => {
+    new KeyboardHandler({ onToolChange, onSpeedChange, onPauseToggle, enableMunicipalTools: false });
+    for (const key of ['t', 'b', 'q', 'w', 'e', 'p', 'r']) {
+      const event = fire(key);
+      expect(event.preventDefault).not.toHaveBeenCalled();
+    }
+    expect(onToolChange).not.toHaveBeenCalled();
+    fire('s');
+    expect(onToolChange).toHaveBeenCalledWith(Tool.SELECT);
+    fire('4');
+    expect(onSpeedChange).toHaveBeenCalledWith(8);
+  });
+
   it('Space triggers onPauseToggle (not onToolChange or onSpeedChange) and calls preventDefault', () => {
     new KeyboardHandler({ onToolChange, onSpeedChange, onPauseToggle });
     const event = fire(' ');
@@ -56,7 +69,7 @@ describe('KeyboardHandler', () => {
     expect(event.preventDefault).toHaveBeenCalled();
   });
 
-  it('1 / 2 / 3 trigger onSpeedChange with correct tiers (not onToolChange) and call preventDefault', () => {
+  it('1 / 2 / 3 / 4 trigger 1x / 2x / 4x / 8x without falling through to tools', () => {
     new KeyboardHandler({ onToolChange, onSpeedChange, onPauseToggle });
 
     const e1 = fire('1');
@@ -71,8 +84,13 @@ describe('KeyboardHandler', () => {
 
     onSpeedChange.mockClear();
     const e3 = fire('3');
-    expect(onSpeedChange).toHaveBeenCalledWith(3);
+    expect(onSpeedChange).toHaveBeenCalledWith(4);
     expect(e3.preventDefault).toHaveBeenCalled();
+
+    onSpeedChange.mockClear();
+    const e4 = fire('4');
+    expect(onSpeedChange).toHaveBeenCalledWith(8);
+    expect(e4.preventDefault).toHaveBeenCalled();
   });
 
   it('q / w / e trigger onToolChange with ZONE_RESIDENTIAL / COMMERCIAL / INDUSTRIAL and call preventDefault', () => {

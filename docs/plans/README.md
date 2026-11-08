@@ -14,7 +14,9 @@ Plano mestre (por quê e o quê)
 ## Regras de execução
 
 - Somente um pacote pode estar `EM ANDAMENTO`.
-- Cada pacote define entradas, entregáveis, critérios de aceitação, testes e não objetivos.
+- Cada pacote define entradas, uma mudança funcional pequena, sua leitura na campanha real, critérios de aceitação, checagens aplicáveis e não objetivos. Evitar refatorações ou telas de revisão sem necessidade para essa mudança.
+- Em cada pacote funcional, ligar Core → `World`/Engine → mapa, HUD ou inspeção em `http://localhost:3000/`; registrar seed, data, ação e efeito observável. Entrega só no Core, teste headless ou rota de cenário independente continua como fundação técnica, com integração de produto pendente.
+- Cada Macroetapa ainda aberta fecha quando seus pacotes produzem no jogo a consequência da matriz do plano mestre, inclusive após salvar e reabrir quando houver estado persistente. Captura em `docs/demos/` é opcional; percurso reproduzível e limites ficam no contexto.
 - Pacote concluído exige evidência em `docs/CONTEXTO.md`.
 - Descobertas de código substituem hipóteses, nunca regras canônicas do produto.
 - Mudança de ordem ou escopo precisa ser registrada como decisão.
@@ -23,8 +25,8 @@ Plano mestre (por quê e o quê)
 
 | Plano | Resultado | Depende de | Estado |
 |---|---|---|---|
-| [Alpha A](alpha-a-fundacao-tecnica.md) | Base auditada roda 1910–1959 deterministicamente e salva | Etapa 0 | EM ANDAMENTO |
-| [Alpha B](alpha-b-cidade.md) | Cidade de Minas cresce autonomamente por 50 anos | Alpha A | NÃO INICIADO |
+| [Alpha A](alpha-a-fundacao-tecnica.md) | Base auditada roda 1910–1959 deterministicamente e salva | Etapa 0 | CONCLUÍDO |
+| [Alpha B](alpha-b-cidade.md) | Cidade de Minas cresce autonomamente por 50 anos | Alpha A | CONCLUÍDO |
 | [Alpha C](alpha-c-clube.md) | Clube pode ser fundado, financiado e patrimonializado | Alpha B | NÃO INICIADO |
 | [Alpha D](alpha-d-sociedade.md) | Pessoas, famílias, identidade e política funcionam | Alpha C | NÃO INICIADO |
 | [Alpha E](alpha-e-futebol.md) | Futebol produz carreiras e partidas por décadas | Alpha D | NÃO INICIADO |

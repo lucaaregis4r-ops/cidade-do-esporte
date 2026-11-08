@@ -137,6 +137,20 @@ function collectImportEdges(files: SourceFile[]): ImportEdge[] {
   );
 }
 
+function directRandomnessViolations(files: ReadonlyArray<SourceFile>): string[] {
+  const directRandomPattern = /\bMath\s*\.\s*random\s*\(/g;
+  const violations: string[] = [];
+
+  for (const file of files.filter((candidate) => candidate.layer === 'core')) {
+    for (const match of file.source.matchAll(directRandomPattern)) {
+      const line = file.source.slice(0, match.index).split('\n').length;
+      violations.push(`${file.relativePath}:${line}: direct Math.random() call`);
+    }
+  }
+
+  return violations;
+}
+
 const sourceFiles = SOURCE_ROOTS.flatMap((root) => collectSourceFiles(resolve(PROJECT_ROOT, root)));
 const importEdges = collectImportEdges(sourceFiles);
 
@@ -202,5 +216,19 @@ describe('architecture boundaries', () => {
     expect(ALLOWED_LAYER_IMPORTS.core.has('render')).toBe(false);
     expect(ALLOWED_LAYER_IMPORTS.render.has('engine')).toBe(false);
     expect(ALLOWED_LAYER_IMPORTS.tools.has('render')).toBe(false);
+  });
+
+  it('keeps direct randomness out of production core', () => {
+    expect(directRandomnessViolations(sourceFiles)).toEqual([]);
+
+    const fixture: SourceFile = {
+      absolutePath: resolve(PROJECT_ROOT, 'game/core/forbidden-randomness-fixture.ts'),
+      relativePath: 'game/core/forbidden-randomness-fixture.ts',
+      layer: 'core',
+      source: ['const safe = 1;', 'const forbidden = Math.random();'].join('\n'),
+    };
+    expect(directRandomnessViolations([fixture])).toEqual([
+      'game/core/forbidden-randomness-fixture.ts:2: direct Math.random() call',
+    ]);
   });
 });

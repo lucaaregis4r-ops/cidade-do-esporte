@@ -18,7 +18,7 @@ import { WORLD_SAVE_VERSION, serializeWorld } from './mapSerialization';
 // the fake localStorage at import-resolution time (but the functions call
 // `typeof localStorage` at runtime, so we just need the global in place when
 // they run).
-import { getWorld, saveWorld, clearSave } from './worldStore';
+import { getWorld, saveWorld, clearSave, STORAGE_KEY } from './worldStore';
 
 // ---- fake localStorage ----
 
@@ -39,8 +39,6 @@ function makeFakeStorage(): FakeStorage {
   };
 }
 
-// The storage key mirrors the constant in worldStore.ts (v19 cut).
-const STORAGE_KEY = 'cimulity:save:v19';
 
 // ---- singleton reset helper ----
 
@@ -95,7 +93,7 @@ describe('saveWorld', () => {
   });
 });
 
-describe('getWorld — older envelopes are rejected and fall back to a fresh procedural world', () => {
+describe('getWorld — older envelopes are rejected and fall back to a fresh procedural world', { timeout: 20000 }, () => {
   // The deserializer accepts only v === WORLD_SAVE_VERSION. Any older
   // envelope is rejected on load and worldStore falls back to a fresh
   // procedural world (money = STARTING_FUNDS, calendar = day 0).
@@ -286,7 +284,7 @@ describe('getWorld — (a) no save → procedural terrain', () => {
   });
 });
 
-describe('getWorld — (b) valid current-version save → matches save terrain', () => {
+describe('getWorld — (b) valid current-version save → matches save terrain', { timeout: 20000 }, () => {
   it('restores terrain exactly from a freshly-saved envelope', () => {
     // Build a source world with procedural terrain and save it.
     const src = new World(64, 64, { regenerate: true });

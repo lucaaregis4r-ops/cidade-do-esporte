@@ -1,8 +1,8 @@
 /**
  * World-envelope (de)serialization.
  *
- * v19 is native; v18 and earlier are rejected; `worldStore` falls back to a fresh
- * procedural world. `t[]` accepts only
+ * v24 is native; v19-v23 migrate explicitly. Older/unknown versions are rejected
+ * without mutating the target. `t[]` accepts only
  * the current `TileType` enum; coherence (water ⇒ GRASS && no building footprint) is checked after
  * staging validation and before commit. `serializeWorld` does NOT validate coherence —
  * it serializes the in-memory `World` as-is; `devApi.seedScene` is the only legitimate
@@ -20,19 +20,29 @@ import type { Building } from './Building';
 import { Terrain, SEA_LEVEL } from './Terrain';
 import { isStructureType, structureFootprintSize } from './StructureMap';
 import type { Structure, StructureType } from './StructureMap';
+import { WORLD_SAVE_VERSION, migrateSaveEnvelope, validateCampaignSave } from './campaignSave';
+import { validateClubState, type ClubState } from './club/Club';
+import { validateLocalClubState, type LocalClubState } from './club/ClubBirthEngine';
+import { validateRegionalClubState, type RegionalClubState } from './club/RegionalClub';
+import { validateFederationState, type FederationState } from './federation/Federation';
+import { validateCompetitionState, type CompetitionState } from './football/Competition';
+import { validateRivalryRelationship, type RivalryRelationship } from './football/RivalryRelationship';
+import { CampaignRng } from './CampaignRng';
+import { generateCampaignCity1910 } from './city/campaignCity';
+import { createCityState } from './city/CityState';
+import { createCityGrowthState, validateCityGrowthState } from './city/cityGrowth';
+import type { CityGrowthState } from './city/cityGrowth';
+import { replayCityTransformationHistory } from './city/cityTransformation';
+import type { CityTransformationState } from './city/cityTransformation';
+import { CAMPAIGN_TRANSFORMATION_PROFILE } from './city/campaignGrowthProfile';
+import { HistoricalClock } from './HistoricalClock';
+import { recordParcelPurchase } from './city/cityParcels';
+export { WORLD_SAVE_VERSION } from './campaignSave';
 
 /**
- * World-envelope version — owned by serializeWorld/deserializeWorldInto.
- * This is the `v` value written to disk. Only native v19 saves are accepted.
- *
- * Bumped 18 -> 19 because the lot-width density cap (`maxDensityForLot`) makes a pre-change
- * save's over-cap density (a 1-wide lot at density 2) a state no SIMULATION path can produce going
- * forward; rejecting stale saves at load is one of two independent guards against it persisting —
- * see `validateBuildingsArray`'s own `e.den > maxDensityForLot(...)` check below for the other,
- * which also catches an over-cap building hand-crafted directly into a *native* v19 envelope (e.g.
- * via devApi, which can construct any otherwise-unreachable state and is not itself blocked here).
+ * Version 24 adds persistent annual city transformation. Versions 19-23 are migrated in
+ * campaignSave; pre-v19 density/terrain schemas remain unsupported.
  */
-export const WORLD_SAVE_VERSION = 19;
 
 /**
  * Maps a StructureType to its corresponding TileType — single source of truth so
@@ -86,7 +96,7 @@ interface BuildingSaveEntry {
 
 /**
  * Serialize the full world state to a JSON string.
- * Always emits `v: WORLD_SAVE_VERSION` (= 19).
+ * Always emits the current `WORLD_SAVE_VERSION`.
  * Does NOT validate coherence — the in-memory world is serialized as-is.
  *
  * `b[]` and `s[]` are both sorted by id ascending for deterministic byte-equality across round-trips.
@@ -138,9 +148,30 @@ export function serializeWorld(world: World): string {
     b,
     s,
     terrain: world.getTerrain().toJSON(),
+    campaign: {
+      worldSeed: world.getWorldSeed(),
+      rng: world.getRngStreams().snapshot(),
+      clock: { version: 1, elapsedDays: world.getElapsedDays() },
+      interruptions: world.getInterruptionState(),
+      nextIds: { buildings: buildings.getNextId(), structures: world.getStructureMap().getNextId() },
+      decisions: world.getDecisionLog(),
+    },
+    city: world.getCityData1910(),
+    cityGrowth: world.getCityGrowthState(),
+    cityTransformation: world.getCityTransformationState(),
+    club: world.getClub(),
+    persons: world.getPersonRegistry().serialize(),
+    localClubs: world.getLocalClubs(),
+    regionalClubs: world.getRegionalClubs(),
+    federation: world.getFederation(),
+    competitions: world.getCompetitions(),
+    tacaBrasil1959: world.getTacaBrasil1959(),
+    rivalries: world.getRivalries(),
+    pressArchive: world.getPressArchive(),
   };
   return JSON.stringify(data);
 }
+
 
 interface WorldSaveData {
   v: number;
@@ -153,7 +184,22 @@ interface WorldSaveData {
   b: unknown[];
   s: unknown[];
   terrain: unknown;
+  campaign: unknown;
+  city: unknown;
+  cityGrowth: unknown;
+  cityTransformation: unknown;
+  transformationNeedsMigration?: boolean;
+  club?: unknown;
+  persons?: unknown;
+  localClubs?: unknown;
+  regionalClubs?: unknown;
+  federation?: unknown;
+  competitions?: unknown;
+  tacaBrasil1959?: unknown;
+  rivalries?: unknown;
+  pressArchive?: unknown;
 }
+
 
 /**
  * Validate the `b[]` array against the staged tile array and stage Building objects.
@@ -339,10 +385,10 @@ function validateStructuresArray(
 }
 
 /**
- * Apply a serialized v19 world envelope onto an existing World instance.
+ * Apply a native v24 or migrated v19–v23 envelope onto an existing World instance.
  * @returns true if the full world state was committed; false (without mutating) on any failure.
  *
- * Ordering: parse → shape-guard → v===19 → dims → m/d → t[] → l[] → b[] → s[] → orphan-check → terrain → coherence → commit.
+ * Ordering: parse → migrate → dims → campaign/m/d → tiles/entities → terrain/coherence → commit.
  * Full staging-then-commit: every invariant is checked before any world mutation.
  */
 export function deserializeWorldInto(world: World, json: string): boolean {
@@ -363,9 +409,9 @@ export function deserializeWorldInto(world: World, json: string): boolean {
     return false;
   }
 
-  const data = parsed as WorldSaveData;
-
-  if (data.v !== WORLD_SAVE_VERSION) return false;
+  const migrated = migrateSaveEnvelope(parsed);
+  if (!migrated) return false;
+  const data = migrated as unknown as WorldSaveData;
 
   // Dims must match the target world.
   const map = world.getMap();
@@ -376,6 +422,146 @@ export function deserializeWorldInto(world: World, json: string): boolean {
   // Money + day: both required, whole non-negative integers.
   if (!Number.isInteger(data.m) || data.m < 0) return false;
   if (!Number.isInteger(data.d) || data.d < 0) return false;
+  const campaign = validateCampaignSave(data.campaign, data.d);
+  if (!campaign) return false;
+  let stagingCity = null as ReturnType<typeof generateCampaignCity1910>['data'] | null;
+  let stagingGrowth = null as CityGrowthState | null;
+  let stagingTransformation = null as CityTransformationState | null;
+  let stagingClub = null as ClubState | null;
+  if (data.club !== undefined && data.club !== null) {
+    stagingClub = validateClubState(data.club);
+    if (!stagingClub) return false;
+  }
+  let stagingLocalClubs: readonly LocalClubState[] = [];
+  if (Array.isArray(data.localClubs)) {
+    const parsed: LocalClubState[] = [];
+    for (const item of data.localClubs) {
+      const valid = validateLocalClubState(item);
+      if (valid) parsed.push(valid);
+    }
+    stagingLocalClubs = Object.freeze(parsed);
+  }
+  let stagingRegionalClubs: readonly RegionalClubState[] = [];
+  if (Array.isArray(data.regionalClubs)) {
+    const parsedReg: RegionalClubState[] = [];
+    for (const item of data.regionalClubs) {
+      const valid = validateRegionalClubState(item);
+      if (valid) parsedReg.push(valid);
+    }
+    stagingRegionalClubs = Object.freeze(parsedReg);
+  }
+  let stagingFederation: FederationState | null = null;
+  if (data.federation !== undefined && data.federation !== null) {
+    stagingFederation = validateFederationState(data.federation);
+  }
+  let stagingCompetitions: readonly CompetitionState[] = [];
+  if (Array.isArray(data.competitions)) {
+    const parsedComps: CompetitionState[] = [];
+    for (const comp of data.competitions) {
+      const validated = validateCompetitionState(comp);
+      if (!validated) return false;
+      parsedComps.push(validated);
+    }
+    stagingCompetitions = Object.freeze(parsedComps);
+  }
+  let stagingRivalries: readonly RivalryRelationship[] = [];
+  if (Array.isArray(data.rivalries)) {
+    const parsedRivalries: RivalryRelationship[] = [];
+    for (const item of data.rivalries) {
+      const validated = validateRivalryRelationship(item);
+      if (validated) parsedRivalries.push(validated);
+    }
+    stagingRivalries = Object.freeze(parsedRivalries);
+  }
+  if (data.city !== null) {
+    try {
+      let expectedCity = generateCampaignCity1910(new CampaignRng(campaign.worldSeed), w, h).data;
+      if (stagingClub && stagingClub.contracts) {
+        for (const contract of stagingClub.contracts) {
+          const parcelIndex = expectedCity.parcels.parcels.findIndex((p) => p.id === contract.parcelId);
+          if (parcelIndex !== -1) {
+            const parcel = expectedCity.parcels.parcels[parcelIndex];
+            let updatedParcel = parcel;
+            if (contract.type === 'COMPRA' || contract.type === 'DOACAO') {
+              updatedParcel = recordParcelPurchase(parcel, {
+                id: `tx-${contract.id}`,
+                date: contract.startDate,
+                pricePpu: contract.type === 'COMPRA' ? contract.upfrontCostPpu : 0,
+                sellerId: parcel.ownerId ?? null,
+                buyerId: stagingClub.id,
+              });
+            } else {
+              updatedParcel = {
+                ...parcel,
+                historicalEvents: [...parcel.historicalEvents, {
+                  id: `ev-${contract.id}`,
+                  date: contract.startDate,
+                  kind: 'ownership-transferred',
+                  description: `Ocupação por ${stagingClub.name} sob regime de ${contract.type} (${contract.grantorName}).`,
+                }],
+              };
+            }
+            const newParcelsList = [...expectedCity.parcels.parcels];
+            newParcelsList[parcelIndex] = updatedParcel;
+            expectedCity = {
+              ...expectedCity,
+              parcels: {
+                ...expectedCity.parcels,
+                parcels: newParcelsList,
+              },
+            };
+          }
+        }
+      }
+      if (JSON.stringify(data.city) !== JSON.stringify(expectedCity)) {
+        return false;
+      }
+      stagingCity = expectedCity;
+      const clock = new HistoricalClock();
+      if (!clock.setElapsedDays(data.d)) return false;
+      if (data.cityGrowth === null) {
+        // v22 had no annual city-growth history. Rebase an empty ledger to its
+        // saved year so only future clock boundaries create visible changes.
+        stagingGrowth = createCityGrowthState(
+          createCityState(campaign.worldSeed, { year: 1910, month: 1, day: 1 }),
+          clock.getDate().year,
+        );
+      } else {
+        stagingGrowth = validateCityGrowthState(
+          data.cityGrowth,
+          campaign.worldSeed,
+          clock.getDate().year,
+          expectedCity.parcels,
+          expectedCity.districts,
+          expectedCity.foundation,
+        );
+        if (!stagingGrowth) return false;
+      }
+      if (data.cityTransformation === null && data.transformationNeedsMigration === true) {
+        stagingTransformation = replayCityTransformationHistory(
+          createCityState(campaign.worldSeed, { year: 1910, month: 1, day: 1 }),
+          stagingGrowth,
+          expectedCity.parcels,
+          expectedCity.foundation,
+          CAMPAIGN_TRANSFORMATION_PROFILE,
+        );
+      } else {
+        if (data.cityTransformation === null) return false;
+        stagingTransformation = replayCityTransformationHistory(
+          createCityState(campaign.worldSeed, { year: 1910, month: 1, day: 1 }),
+          stagingGrowth,
+          expectedCity.parcels,
+          expectedCity.foundation,
+          CAMPAIGN_TRANSFORMATION_PROFILE,
+        );
+        if (JSON.stringify(data.cityTransformation) !== JSON.stringify(stagingTransformation)) return false;
+      }
+    } catch {
+      return false;
+    }
+  } else if (data.cityGrowth !== null || data.cityTransformation !== null) {
+    return false;
+  }
 
   // t[]: required array of length w*h with every entry in the current TileType enum.
   const size = w * h;
@@ -410,6 +596,8 @@ export function deserializeWorldInto(world: World, json: string): boolean {
   // s[]: staged Structure objects, fully validated (shares occupiedIndices with buildings).
   const stagingStructures = validateStructuresArray(data, w, h, occupiedIndices);
   if (stagingStructures === null) return false;
+  if (stagingBuildings.some((building) => building.id >= campaign.nextIds.buildings)) return false;
+  if (stagingStructures.some((structure) => structure.id >= campaign.nextIds.structures)) return false;
 
   // Orphan-structure-tile check: every structure tile type (POWER_PLANT, WATER_TOWER,
   // POLICE_STATION, FIRE_STATION, HOSPITAL, SCHOOL, PARK — see STRUCTURE_TILE_TYPES) in t[] must be covered by a staged structure;
@@ -480,7 +668,36 @@ export function deserializeWorldInto(world: World, json: string): boolean {
 
   // All validation passed — commit. regenerate: false so procedural terrain does not
   // overwrite the hydrated data we are about to install.
-  world.reset({ regenerate: false });
+  world.reset({ regenerate: false, worldSeed: campaign.worldSeed });
+  world.setCityData1910(stagingCity);
+  world.setCityGrowthState(stagingGrowth);
+  world.setCityTransformationState(stagingTransformation);
+  world.setClub(stagingClub);
+  if (stagingLocalClubs.length > 0) {
+    world.setLocalClubs(stagingLocalClubs);
+  }
+  if (stagingRegionalClubs.length > 0) {
+    world.setRegionalClubs(stagingRegionalClubs);
+  }
+  world.setFederation(stagingFederation);
+  if (stagingCompetitions.length > 0) {
+    world.setCompetitions(stagingCompetitions);
+  }
+  if (data.tacaBrasil1959) {
+    world.setTacaBrasil1959(data.tacaBrasil1959 as any);
+  }
+  if (data.persons && typeof data.persons === 'object' && 'persons' in (data.persons as Record<string, unknown>)) {
+    world.setPersonRegistryState(data.persons as import('./person/PersonRegistry').PersonRegistryState);
+  }
+  if (stagingRivalries.length > 0) {
+    world.setRivalries(stagingRivalries);
+  } else {
+    world.ensureRivalriesInitialized();
+  }
+  if (Array.isArray(data.pressArchive)) {
+    world.setPressArchive(data.pressArchive as any);
+  }
+
 
   for (let i = 0; i < size; i++) {
     const x = i % w;
@@ -503,11 +720,16 @@ export function deserializeWorldInto(world: World, json: string): boolean {
     if (structure.id > maxStructureId) maxStructureId = structure.id;
   }
   if (maxStructureId >= 0) structureMap.setNextIdFloor(maxStructureId);
+  if (campaign.nextIds.buildings > 0) buildings.setNextIdFloor(campaign.nextIds.buildings - 1);
+  if (campaign.nextIds.structures > 0) structureMap.setNextIdFloor(campaign.nextIds.structures - 1);
 
   world.installTerrain(candidateTerrain);
 
   world.setMoney(data.m);
   world.setElapsedDays(data.d);
+  world.getRngStreams().restore(campaign.rng);
+  world.restoreInterruptionState(campaign.interruptions);
+  world.restoreDecisionLog(campaign.decisions);
 
   // Land value and service coverage are not persisted — mark dirty so the first tick after load recomputes.
   // Demand is dirtied via the markLaborDirty() cascade below.

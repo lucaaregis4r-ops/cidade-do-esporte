@@ -1,6 +1,7 @@
 {
-  "name": "cimulity",
+  "name": "tradicao-esporte-clube",
   "version": "0.1.0",
+  "description": "Tradição Esporte Clube — Simulador histórico-procedural de futebol (1910–1959)",
   "private": true,
   "license": "MIT",
   "scripts": {

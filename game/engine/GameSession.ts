@@ -8,7 +8,7 @@
 
 import { PixiApp } from '../render/PixiApp';
 import type { DataView } from '../render/dataView';
-import { getWorld, saveWorld, clearSave } from '../core/worldStore';
+import { getWorld, saveWorld, clearSave, getPersistenceNotice } from '../core/worldStore';
 import { PointerHandler } from '../input/PointerHandler';
 import { CameraController } from '../input/CameraController';
 import { ToolManager } from '../input/ToolManager';
@@ -25,8 +25,16 @@ import { EMPTY_CITY_DEMAND } from '../core/Demand';
 import type { TileCoord, ScreenCoord } from '../types/coordinates';
 import type { ToolResult, ToolPreview } from '../tools';
 import type { GameLoopTickInfo, SpeedMultiplier } from '../core/GameLoop';
+import type { Interruption } from '../core/InterruptionQueue';
+import { encodeReplayPackage } from '../core/DecisionLog';
+import type { DecisionTool } from '../core/DecisionLog';
 import { TILE_COLORS } from '../render/visuals/palette';
 import { installDevApi, uninstallDevApi } from './devApi';
+import type { ClubState } from '../core/club/Club';
+import type { LandOccupancyContract } from '../core/club/ClubLandContract';
+import type { FacilityType } from '../core/club/ClubFacilities';
+import type { MemberCategory } from '../core/club/ClubMembers';
+import type { CityParcel } from '../core/city/cityParcels';
 
 // Drag-preview colors sourced from the shared palette so there's one source of truth.
 const DRAG_PREVIEW_COLORS: Partial<Record<Tool, number>> = {
@@ -54,6 +62,9 @@ const DRAG_PREVIEW_COLORS: Partial<Record<Tool, number>> = {
  * forwarder left un-updated would have dropped the new field at runtime, unflagged.
  */
 export interface TickUpdate {
+  worldSeed: string;
+  citySummary: { districts: number; parcels: number; institutions: number } | null;
+  club: ClubState | null;
   tick: number;
   dirt: number;
   population: number;
@@ -67,6 +78,8 @@ export interface TickUpdate {
   unemployed: number;
   /** Non-abandoned C/I capacity INCLUDING road-less buildings that can never fill (see `LaborResult` in laborMarket.ts). */
   jobsCapacity: number;
+  cityGrowth: { throughYear: number; developments: number; populationUnits: number; jobUnits: number } | null;
+  cityTransformation: { throughYear: number; activeBuildings: number; pastBuildings: number; centralities: number; avenues: number } | null;
 }
 
 export interface GameSessionCallbacks {
@@ -92,6 +105,9 @@ export interface GameSessionCallbacks {
    */
   onSpeedChange?: (multiplier: SpeedMultiplier) => void;
   onPauseChange?: (paused: boolean) => void;
+  /** Fires when an eligible queued event causes the simulation to pause. */
+  onInterruption?: (interruption: Interruption | null) => void;
+  onPersistenceNotice?: (notice: string | null) => void;
 }
 
 export class GameSession {
@@ -111,6 +127,7 @@ export class GameSession {
    */
   private pendingSpeedMultiplier: SpeedMultiplier | null = null;
   private pendingPauseToggleCount = 0;
+  private activeInterruptionId: string | null = null;
   // Buffers the requested view so setDataView() calls before pixiApp exists survive.
   private pendingDataView: DataView = 'none';
   private disposed = false;
@@ -161,10 +178,63 @@ export class GameSession {
     this.callbacks.onPauseChange?.(next);
   }
 
+  acknowledgeInterruption(): void {
+    if (this.activeInterruptionId !== null) this.world?.acknowledgeInterruption(this.activeInterruptionId);
+    this.activeInterruptionId = null;
+    this.callbacks.onInterruption?.(null);
+    this.saveNow();
+  }
+
+  focusLatestCityDevelopment(): void {
+    const development = this.world?.getCityGrowthState()?.developments.at(-1);
+    if (!development) return;
+    const parcel = this.world?.getCityParcels1910()?.parcels.find((item) => item.id === development.parcelId);
+    const tile = parcel?.tiles[0];
+    if (tile) this.pixiApp?.focusCampaignTile(tile);
+  }
+
+  focusLatestCityTransformation(): void {
+    const state = this.world?.getCityTransformationState();
+    if (!state) return;
+    const latestBuilding = [...state.buildings].reverse().find(({ status }) => status !== 'active');
+    const parcelId = latestBuilding?.parcelId ?? state.centralities.at(-1)?.parcelId;
+    if (parcelId) {
+      const parcel = this.world?.getCityParcels1910()?.parcels.find((item) => item.id === parcelId);
+      if (parcel?.tiles[0]) {
+        this.pixiApp?.focusCampaignTile(parcel.tiles[0]);
+        return;
+      }
+    }
+    const avenue = state.avenueUpgrades.at(-1);
+    if (avenue?.path[0]) this.pixiApp?.focusCampaignTile(avenue.path[0]);
+  }
+
+  focusClubGround(): TileCoord | null {
+    const club = this.world?.getClub();
+    if (!club || !club.parcels || club.parcels.length === 0) return null;
+    const parcelId = club.parcels[0];
+    const parcel = this.world?.getCityParcels1910()?.parcels.find((item) => item.id === parcelId);
+    const tile = parcel?.tiles[0];
+    if (tile) {
+      this.pixiApp?.focusCampaignTile(tile);
+      this.pixiApp?.setSelectedTile(tile);
+      return tile;
+    }
+    return null;
+  }
+
+  getClubGroundTile(): TileCoord | null {
+    const club = this.world?.getClub();
+    if (!club || !club.parcels || club.parcels.length === 0) return null;
+    const parcelId = club.parcels[0];
+    const parcel = this.world?.getCityParcels1910()?.parcels.find((item) => item.id === parcelId);
+    return parcel?.tiles[0] ?? null;
+  }
+
   // Redraw tiles only if a tool command actually changed core state,
   // and debounce-persist so rapid drags coalesce into one write.
-  private markIfChanged(result: ToolResult): void {
-    if (result.changedTiles.length === 0) return;
+  private markIfChanged(result: ToolResult): boolean {
+    if (result.changedTiles.length === 0) return false;
     this.pixiApp?.getTileRenderer()?.markDirty();
     const tr = this.pixiApp?.getTileRenderer();
     if (tr) {
@@ -180,6 +250,13 @@ export class GameSession {
     // demand: below force-refreshes labor when demandDirty (which markLaborDirty always sets
     // alongside laborDirty), so employed/unemployed/jobsCapacity here are always plain reads.
     this.callbacks.onTickUpdate?.({
+      worldSeed: this.world!.getWorldSeed(),
+      citySummary: this.world!.getCityData1910() ? {
+        districts: this.world!.getCityData1910()!.districts.districts.length,
+        parcels: this.world!.getCityData1910()!.parcels.parcels.length,
+        institutions: this.world!.getCityData1910()!.foundation.institutions.length,
+      } : null,
+      club: this.world!.getClub(),
       tick: this.world!.getTick(),
       dirt: this.world!.countDirt(),
       population: this.world!.getPopulation(),
@@ -191,17 +268,31 @@ export class GameSession {
       employed: this.world!.getEmployed(),
       unemployed: this.world!.getUnemployed(),
       jobsCapacity: this.world!.getJobsCapacity(),
+      cityGrowth: this.world!.getCityGrowthState() ? {
+        throughYear: this.world!.getCityGrowthState()!.throughYear,
+        developments: this.world!.getCityGrowthState()!.developments.length,
+        populationUnits: this.world!.getCityGrowthState()!.populationUnitsAdded,
+        jobUnits: this.world!.getCityGrowthState()!.jobUnitsAdded,
+      } : null,
+      cityTransformation: this.world!.getCityTransformationState() ? {
+        throughYear: this.world!.getCityTransformationState()!.throughYear,
+        activeBuildings: this.world!.getCityTransformationState()!.buildings.filter(({ status }) => status === 'active').length,
+        pastBuildings: this.world!.getCityTransformationState()!.buildings.filter(({ status }) => status !== 'active').length,
+        centralities: this.world!.getCityTransformationState()!.centralities.length,
+        avenues: this.world!.getCityTransformationState()!.avenueUpgrades.length,
+      } : null,
     });
     // Keep tracker in sync; tool mutation already scheduled a save via scheduleSave above.
     this.lastSyncedMoney = money;
     this.lastSyncedElapsedDays = this.world!.getElapsedDays();
+    return true;
   }
 
   private scheduleSave(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
-      if (this.world) saveWorld(this.world);
+      this.saveNow();
     }, 500);
   }
 
@@ -212,6 +303,7 @@ export class GameSession {
       this.saveTimer = null;
     }
     if (this.world) saveWorld(this.world);
+    this.callbacks.onPersistenceNotice?.(getPersistenceNotice());
   }
 
   private performDestructiveReset(opts: { seed?: number; clearSaveAfter: boolean; regenerate?: boolean }): void {
@@ -226,6 +318,7 @@ export class GameSession {
     // Step 3: conditionally clear the persisted save.
     if (opts.clearSaveAfter) {
       clearSave();
+      this.callbacks.onPersistenceNotice?.(getPersistenceNotice());
     }
     // Step 4: reset loop/pause/speed mirrors.
     this.gameLoop?.reset();
@@ -233,20 +326,29 @@ export class GameSession {
     // pre-`gameLoop` window cannot replay stale toggles after defaults are restored.
     this.pendingSpeedMultiplier = null;
     this.pendingPauseToggleCount = 0;
+    this.activeInterruptionId = null;
     this.gameLoop?.setPaused(false);
     this.gameLoop?.setSpeedMultiplier(DEFAULT_SPEED_MULTIPLIER);
     // Step 5: emit tick HUD sync.
     // Mirror callbacks fire even when gameLoop is null so React HUD/Toolbar snap back to defaults immediately.
     this.callbacks.onPauseChange?.(false);
+    this.callbacks.onInterruption?.(null);
     this.callbacks.onSpeedChange?.(DEFAULT_SPEED_MULTIPLIER);
     // Read post-reset money (reset already set STARTING_FUNDS; avoids ordering coupling).
     const m = this.world ? this.world.getMoney() : STARTING_FUNDS;
     this.callbacks.onTickUpdate?.({
+      worldSeed: this.world?.getWorldSeed() ?? '',
+      citySummary: this.world?.getCityData1910() ? {
+        districts: this.world.getCityData1910()!.districts.districts.length,
+        parcels: this.world.getCityData1910()!.parcels.parcels.length,
+        institutions: this.world.getCityData1910()!.foundation.institutions.length,
+      } : null,
+      club: this.world?.getClub() ?? null,
       tick: 0,
       dirt: 0,
       population: 0,
       money: m,
-      date: this.world ? this.world.getDate() : { year: 1, month: 1, day: 1 },
+      date: this.world ? this.world.getDate() : { year: 1910, month: 1, day: 1 },
       demand: this.world ? this.world.getDemand() : EMPTY_CITY_DEMAND,
       happiness: this.world ? this.world.getHappiness() : EMPTY_CITY_HAPPINESS,
       // reset() already sets trafficDirty = false and clears the map, so this is a plain read.
@@ -254,6 +356,19 @@ export class GameSession {
       employed: this.world ? this.world.getEmployed() : 0,
       unemployed: this.world ? this.world.getUnemployed() : 0,
       jobsCapacity: this.world ? this.world.getJobsCapacity() : 0,
+      cityGrowth: this.world?.getCityGrowthState() ? {
+        throughYear: this.world.getCityGrowthState()!.throughYear,
+        developments: this.world.getCityGrowthState()!.developments.length,
+        populationUnits: this.world.getCityGrowthState()!.populationUnitsAdded,
+        jobUnits: this.world.getCityGrowthState()!.jobUnitsAdded,
+      } : null,
+      cityTransformation: this.world?.getCityTransformationState() ? {
+        throughYear: this.world.getCityTransformationState()!.throughYear,
+        activeBuildings: this.world.getCityTransformationState()!.buildings.filter(({ status }) => status === 'active').length,
+        pastBuildings: this.world.getCityTransformationState()!.buildings.filter(({ status }) => status !== 'active').length,
+        centralities: this.world.getCityTransformationState()!.centralities.length,
+        avenues: this.world.getCityTransformationState()!.avenueUpgrades.length,
+      } : null,
     });
     this.lastSyncedMoney = m;
     this.lastSyncedElapsedDays = this.world ? this.world.getElapsedDays() : 0;
@@ -325,6 +440,7 @@ export class GameSession {
     // Attach keyboard FIRST so early key presses during async Pixi init are captured.
     // GameSession.setSpeedMultiplier/togglePaused queue when gameLoop is still null.
     const keyboardHandler = new KeyboardHandler({
+      enableMunicipalTools: false,
       onToolChange: (tool) => {
         this.setTool(tool);
         this.callbacks.onToolChange?.(tool);
@@ -336,6 +452,13 @@ export class GameSession {
     // Reuse the process-wide World so HMR/Fast Refresh keeps placed tiles
     const world = getWorld();
     this.world = world;
+    if (!world.getClub()) {
+      world.ensureFoundingClub();
+    }
+    this.callbacks.onPersistenceNotice?.(getPersistenceNotice());
+    const pending = world.getInterruptions()[0] ?? null;
+    this.activeInterruptionId = pending?.id ?? null;
+    this.callbacks.onInterruption?.(pending);
     console.log('GameCanvas: World created');
 
     // Initialize PixiJS app
@@ -382,7 +505,13 @@ export class GameSession {
     // Installed AFTER pixiApp.init() succeeds and camera/canvas are confirmed
     // present — otherwise `setCameraTile` / `markDirty` would silently no-op.
     // No-op in production builds (see devApi.ts).
-    installDevApi(world, pixiApp, { resetWorld: () => this.resetWorld(), saveNow: () => this.saveNow(), regenerateTerrain: (seed?: number) => this.regenerateTerrain(seed), resetFlat: () => this.resetFlat() });
+    installDevApi(world, pixiApp, {
+      resetWorld: () => this.resetWorld(),
+      saveNow: () => this.saveNow(),
+      regenerateTerrain: (seed?: number) => this.regenerateTerrain(seed),
+      resetFlat: () => this.resetFlat(),
+      exportReplayPackage: () => encodeReplayPackage(world.getWorldSeed(), world.getDecisionLog()),
+    });
 
     // Flush data-view selection buffered before start() (e.g. mount effect ran
     // before PixiApp was constructed). Mirrors the pending speed/pause flush below.
@@ -408,7 +537,15 @@ export class GameSession {
       onTileClick: (tile, screen) => {
         // Single-tile execution goes through the dispatcher, same as drags
         const tool = this.toolManager.getCurrentTool();
-        this.markIfChanged(executeClick(tool, tile, world));
+        if (this.markIfChanged(executeClick(tool, tile, world))) {
+          world.recordDecision({
+            day: world.getElapsedDays(),
+            kind: 'click',
+            tool: tool as DecisionTool,
+            start: { ...tile },
+            end: { ...tile },
+          });
+        }
         refreshHover(tile);
         // Reapply the hover ghost for the post-click world state (e.g. a freshly
         // placed road now classifies differently on the next hover pass).
@@ -425,7 +562,15 @@ export class GameSession {
       onTileDrag: (start, end) => {
         // Resolve path with the current tool at drag time
         const tool = this.toolManager.getCurrentTool();
-        this.markIfChanged(executeDrag(tool, start, end, world));
+        if (this.markIfChanged(executeDrag(tool, start, end, world))) {
+          world.recordDecision({
+            day: world.getElapsedDays(),
+            kind: 'drag',
+            tool: tool as DecisionTool,
+            start: { ...start },
+            end: { ...end },
+          });
+        }
         refreshHover(end);
       },
       onDragPreview: (start, end) => {
@@ -470,6 +615,13 @@ export class GameSession {
       // land-value cascade, so the getTrafficMap() read below never forces its own recompute.
       const happiness = world.getHappiness();
       this.callbacks.onTickUpdate?.({
+        worldSeed: world.getWorldSeed(),
+        citySummary: world.getCityData1910() ? {
+          districts: world.getCityData1910()!.districts.districts.length,
+          parcels: world.getCityData1910()!.parcels.parcels.length,
+          institutions: world.getCityData1910()!.foundation.institutions.length,
+        } : null,
+        club: world.getClub(),
         tick: agg.tick,
         dirt: world.countDirt(),
         population: world.getPopulation(),
@@ -481,9 +633,27 @@ export class GameSession {
         employed: world.getEmployed(),
         unemployed: world.getUnemployed(),
         jobsCapacity: world.getJobsCapacity(),
+        cityGrowth: world.getCityGrowthState() ? {
+          throughYear: world.getCityGrowthState()!.throughYear,
+          developments: world.getCityGrowthState()!.developments.length,
+          populationUnits: world.getCityGrowthState()!.populationUnitsAdded,
+          jobUnits: world.getCityGrowthState()!.jobUnitsAdded,
+        } : null,
+        cityTransformation: world.getCityTransformationState() ? {
+          throughYear: world.getCityTransformationState()!.throughYear,
+          activeBuildings: world.getCityTransformationState()!.buildings.filter(({ status }) => status === 'active').length,
+          pastBuildings: world.getCityTransformationState()!.buildings.filter(({ status }) => status !== 'active').length,
+          centralities: world.getCityTransformationState()!.centralities.length,
+          avenues: world.getCityTransformationState()!.avenueUpgrades.length,
+        } : null,
       });
       this.lastSyncedMoney = money;
       this.lastSyncedElapsedDays = elapsedDays;
+    }, undefined, undefined, (interruption) => {
+      this.activeInterruptionId = interruption.id;
+      this.callbacks.onPauseChange?.(true);
+      this.callbacks.onInterruption?.(interruption);
+      this.saveNow();
     });
     // Sync HUD to the world's current state before the first tick, so a
     // hydrated/reused world with persisted DIRT shows the real count instead
@@ -492,6 +662,13 @@ export class GameSession {
     // land-value cascade, so the getTrafficMap() read below never forces its own recompute.
     const initialHappiness = world.getHappiness();
     this.callbacks.onTickUpdate?.({
+      worldSeed: world.getWorldSeed(),
+      citySummary: world.getCityData1910() ? {
+        districts: world.getCityData1910()!.districts.districts.length,
+        parcels: world.getCityData1910()!.parcels.parcels.length,
+        institutions: world.getCityData1910()!.foundation.institutions.length,
+      } : null,
+      club: world.getClub(),
       tick: world.getTick(),
       dirt: world.countDirt(),
       population: world.getPopulation(),
@@ -503,6 +680,19 @@ export class GameSession {
       employed: world.getEmployed(),
       unemployed: world.getUnemployed(),
       jobsCapacity: world.getJobsCapacity(),
+      cityGrowth: world.getCityGrowthState() ? {
+        throughYear: world.getCityGrowthState()!.throughYear,
+        developments: world.getCityGrowthState()!.developments.length,
+        populationUnits: world.getCityGrowthState()!.populationUnitsAdded,
+        jobUnits: world.getCityGrowthState()!.jobUnitsAdded,
+      } : null,
+      cityTransformation: world.getCityTransformationState() ? {
+        throughYear: world.getCityTransformationState()!.throughYear,
+        activeBuildings: world.getCityTransformationState()!.buildings.filter(({ status }) => status === 'active').length,
+        pastBuildings: world.getCityTransformationState()!.buildings.filter(({ status }) => status !== 'active').length,
+        centralities: world.getCityTransformationState()!.centralities.length,
+        avenues: world.getCityTransformationState()!.avenueUpgrades.length,
+      } : null,
     });
     this.lastSyncedMoney = world.getMoney();
     this.lastSyncedElapsedDays = world.getElapsedDays();
@@ -538,6 +728,332 @@ export class GameSession {
    */
   resize(width: number, height: number): void {
     this.pixiApp?.resize(width, height);
+  }
+
+  getClub(): ClubState | null {
+    return this.world?.getClub() ?? null;
+  }
+
+  ensureFoundingClub(): ClubState | null {
+    if (!this.world) return null;
+    const club = this.world.ensureFoundingClub();
+    if (club) {
+      this.pixiApp?.getTileRenderer()?.markDirty();
+      this.scheduleSave();
+    }
+    return club;
+  }
+
+  foundClubWithParcel(club: ClubState, parcelId: string, contract: LandOccupancyContract): boolean {
+    if (!this.world) return false;
+    const success = this.world.foundClubWithParcel(club, parcelId, contract);
+    if (success) {
+      this.pixiApp?.getTileRenderer()?.markDirty();
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  getCityParcels(): readonly CityParcel[] {
+    return this.world?.getCityParcels1910()?.parcels ?? [];
+  }
+
+  buildClubFacility(type: FacilityType, customName?: string): boolean {
+    if (!this.world) return false;
+    const success = this.world.buildClubFacility(type, customName);
+    if (success) {
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  repairClubFacility(facilityId: string): boolean {
+    if (!this.world) return false;
+    const success = this.world.repairClubFacility(facilityId);
+    if (success) {
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  admitClubMember(
+    name: string,
+    category: MemberCategory,
+    socialClass: 'working_class' | 'middle_class' | 'upper_class' | 'elite',
+    occupation: string,
+  ): boolean {
+    if (!this.world) return false;
+    const success = this.world.admitClubMember(name, category, socialClass, occupation);
+    if (success) {
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  getPerson(id: string): import('../core/person/Person').Person | undefined {
+    return this.world?.getPerson(id);
+  }
+
+  getFamilyTree(personId: string): import('../core/person/PersonRegistry').FamilyTreeNode | undefined {
+    return this.world?.getFamilyTree(personId);
+  }
+
+  getAllPersons(): readonly import('../core/person/Person').Person[] {
+    return this.world?.getAllPersons() ?? [];
+  }
+
+  getUrbanDemographics(): import('../core/club/PopulationLayers').UrbanDemographicsSnapshot | undefined {
+    return this.world?.getUrbanDemographics();
+  }
+
+  getElectionCandidates(): readonly import('../core/club/ClubElections').ElectionCandidate[] {
+    return this.world?.getElectionCandidates() ?? [];
+  }
+
+  holdClubElection(playerVotedCandidateId?: string): import('../core/club/ClubElections').ClubElectionEvent | null {
+    if (!this.world) return null;
+    const election = this.world.holdClubElection(playerVotedCandidateId);
+    if (election) {
+      this.scheduleSave();
+      return election;
+    }
+    return null;
+  }
+
+  getFootballSquad(): import('../core/football/Footballer').FootballSquadState | undefined {
+    return this.world?.getFootballSquad();
+  }
+
+  getFootballers(): readonly import('../core/football/Footballer').Footballer[] {
+    return this.world?.getFootballers() ?? [];
+  }
+
+  setSquadTrainingRegime(regime: import('../core/football/Footballer').TrainingRegime): boolean {
+    if (!this.world) return false;
+    const ok = this.world.setSquadTrainingRegime(regime);
+    if (ok) {
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  getClubAthleticsPolicy(): import('../core/football/FootballMarket').ClubAthleticsPolicyState | undefined {
+    return this.world?.getClubAthleticsPolicy();
+  }
+
+  setClubAthleticsPolicy(tier: import('../core/football/FootballMarket').ClubPolicyTier): boolean {
+    if (!this.world) return false;
+    const ok = this.world.setClubAthleticsPolicy(tier);
+    if (ok) {
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  getAvailableLocalProspects(): readonly import('../core/person/Person').Person[] {
+    return this.world?.getAvailableLocalProspects() ?? [];
+  }
+
+  inviteProspectToClub(
+    personId: string,
+    position: import('../core/football/Footballer').HistoricalPosition,
+    role: import('../core/football/Footballer').SquadRole
+  ): { success: boolean; message: string; footballer?: import('../core/football/Footballer').Footballer } {
+    if (!this.world) return { success: false, message: 'Mundo não carregado' };
+    const res = this.world.inviteProspectToClub(personId, position, role);
+    if (res.success) {
+      this.scheduleSave();
+    }
+    return res;
+  }
+
+  releaseFootballerFromSquad(footballerId: string): boolean {
+    if (!this.world) return false;
+    const ok = this.world.releaseFootballerFromSquad(footballerId);
+    if (ok) {
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  promoteOrDemoteFootballerRole(footballerId: string, role: import('../core/football/Footballer').SquadRole): boolean {
+    if (!this.world) return false;
+    const ok = this.world.promoteOrDemoteFootballerRole(footballerId, role);
+    if (ok) {
+      this.scheduleSave();
+      return true;
+    }
+    return false;
+  }
+
+  getLatestRivalInquiries(): readonly import('../core/football/FootballMarket').RivalInquiry[] {
+    return this.world?.getLatestRivalInquiries() ?? [];
+  }
+
+  getLocalClubs(): readonly import('../core/club/ClubBirthEngine').LocalClubState[] {
+    return this.world?.getLocalClubs() ?? [];
+  }
+
+  getRegionalClubs(): readonly import('../core/club/RegionalClub').RegionalClubState[] {
+    return this.world?.getRegionalClubs() ?? [];
+  }
+
+  getFederation(): import('../core/federation/Federation').FederationState | null {
+    return this.world?.getFederation() ?? null;
+  }
+
+  getAvailableHistoricalRivals(): readonly import('../core/football/MatchEngine').Historical1910RivalPreset[] {
+    return this.world?.getAvailableHistoricalRivals() ?? [];
+  }
+
+  getClubMatchHistory(): readonly import('../core/football/MatchEngine').MatchRecord[] {
+    return this.world?.getClubMatchHistory() ?? [];
+  }
+
+  getLatestClubMatch(): import('../core/football/MatchEngine').MatchRecord | undefined {
+    return this.world?.getLatestClubMatch();
+  }
+
+  playFriendlyMatch(
+    rivalPresetName: string,
+    competitionType: 'friendly' | 'festival_taça' = 'friendly'
+  ): import('../core/football/MatchEngine').MatchRecord | null {
+    if (!this.world) return null;
+    const record = this.world.playFriendlyMatch(rivalPresetName, competitionType);
+    if (record) {
+      this.scheduleSave();
+    }
+    return record;
+  }
+
+  getCompetitions(): readonly import('../core/football/Competition').CompetitionState[] {
+    return this.world?.getCompetitions() ?? [];
+  }
+
+  getActiveCompetitions(): readonly import('../core/football/Competition').CompetitionState[] {
+    return this.world?.getActiveCompetitions() ?? [];
+  }
+
+  playCompetitionMatch(
+    competitionId: string,
+    fixtureId: string
+  ): import('../core/football/MatchEngine').MatchRecord | null {
+    if (!this.world) return null;
+    const record = this.world.playCompetitionMatch(competitionId, fixtureId);
+    if (record) {
+      this.scheduleSave();
+    }
+    return record;
+  }
+
+  getRivalries(): readonly import('../core/football/RivalryRelationship').RivalryRelationship[] {
+    return this.world?.getRivalries() ?? [];
+  }
+
+  getRivalryForClubs(
+    clubAId: string,
+    clubBId: string
+  ): import('../core/football/RivalryRelationship').RivalryRelationship | undefined {
+    return this.world?.getRivalryForClubs(clubAId, clubBId);
+  }
+
+  getSupporterTerritories(): readonly import('../core/football/SupporterTerritory').ClubSupporterTerritory[] {
+    return this.world?.getSupporterTerritories() ?? [];
+  }
+
+  getPressArchive(): readonly import('../core/media/HistoricalPress').PressArticle[] {
+    return this.world?.getPressArchive() ?? [];
+  }
+
+  getAvailableMediaOutlets(): readonly import('../core/media/HistoricalPress').NewspaperProfile[] {
+    return this.world?.getAvailableMediaOutlets() ?? [];
+  }
+
+  getClubLegends(): readonly import('../core/club/LegacyScore').ClubLegend[] {
+    return this.world?.getClubLegends() ?? [];
+  }
+
+  getInstitutionalHonors(): readonly import('../core/club/InstitutionalHonors').InstitutionalHonorProposal[] {
+    return this.world?.getInstitutionalHonors() ?? [];
+  }
+
+  proposeInstitutionalHonor(
+    legendId: string,
+    honorType: import('../core/club/InstitutionalHonors').HonorType
+  ): { success: boolean; proposal?: import('../core/club/InstitutionalHonors').InstitutionalHonorProposal; message: string } {
+    return (
+      this.world?.proposeInstitutionalHonor(legendId, honorType) ?? {
+        success: false,
+        message: 'Mundo indisponível.',
+      }
+    );
+  }
+
+  voteInstitutionalHonor(
+    proposalId: string
+  ): { success: boolean; approved: boolean; outcome: string } {
+    return (
+      this.world?.voteInstitutionalHonor(proposalId) ?? {
+        success: false,
+        approved: false,
+        outcome: 'Mundo indisponível.',
+      }
+    );
+  }
+
+  getClubTraditionProfile(): import('../core/club/TraditionSystem').ClubTraditionProfile | null {
+    return this.world?.getClubTraditionProfile() ?? null;
+  }
+
+  getHistoricalLedger(): import('../core/club/HistoricalLedger').HistoricalLedgerState {
+    return this.world?.getHistoricalLedger() ?? { events: [] };
+  }
+
+  getCausalChainForEvent(eventId: string) {
+    return this.world?.getCausalChainForEvent(eventId) ?? {
+      rootCauses: [],
+      downstreamConsequences: [],
+    };
+  }
+
+  getClubArchive(): import('../core/club/ClubArchive').ClubArchiveData | null {
+    return this.world?.getClubArchive() ?? null;
+  }
+
+  getTacaBrasil1959(): import('../core/football/TacaBrasil1959').TacaBrasilTournament | null {
+    return this.world?.getTacaBrasil1959() ?? null;
+  }
+
+  generateTacaBrasil1959(): import('../core/football/TacaBrasil1959').TacaBrasilTournament | null {
+    if (!this.world) return null;
+    const tournament = this.world.generateTacaBrasil1959();
+    this.scheduleSave();
+    return tournament;
+  }
+
+  advanceTacaBrasil(): import('../core/football/TacaBrasil1959').TacaBrasilTournament | null {
+    if (!this.world) return null;
+    const updated = this.world.advanceTacaBrasil();
+    this.scheduleSave();
+    return updated;
+  }
+
+  simulateEntireTacaBrasil(): import('../core/football/TacaBrasil1959').TacaBrasilTournament | null {
+    if (!this.world) return null;
+    const updated = this.world.simulateEntireTacaBrasil();
+    this.scheduleSave();
+    return updated;
+  }
+
+  getFiftyYearsReport(): import('../core/club/FiftyYearsReport').FiftyYearsReportData | null {
+    return this.world?.getFiftyYearsReport() ?? null;
   }
 
   dispose(): void {

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "status": "research-required",
+  "baseDate": null,
+  "baseNominalReisPerPpu": null,
+  "costOfLiving": [],
+  "monetaryStandards": [
+    {
+      "id": "brazil-cruzeiro-1942",
+      "value": "Cr$ 1.00 = Rs 1$000",
+      "effectiveFrom": "1942-11-01",
+      "effectiveThrough": "1959-12-31",
+      "sources": [
+        "https://www.planalto.gov.br/ccivil_03/decreto-lei/1937-1946/del4791.htm",
+        "https://www.bcb.gov.br/content/acessoinformacao/museudocs/pub/SintesePadroesMonetariosBrasileiros.pdf"
+      ],
+      "interpretation": "Canonical campaign denomination and exact legal conversion factor for nominal display during the campaign.",
+      "limitation": "The decree allowed réis and cruzeiros to circulate concurrently during the transition; the game uses the planned display switch on 1942-11-01. This is denomination conversion, not inflation or purchasing-power calibration."
+    }
+  ]
+}

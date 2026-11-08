@@ -7,7 +7,6 @@ import {
   STARTING_FUNDS,
   TAX_PER_POP,
   DAYS_PER_MONTH,
-  MONTHS_PER_YEAR,
   POWER_INTERVAL,
   WATER_INTERVAL,
   SERVICE_INTERVAL,
@@ -307,30 +306,30 @@ describe('World.setMoney()', () => {
   });
 });
 
-describe('World calendar', () => {
-  it('from a fresh world getDate() is {1,1,1} and getElapsedDays() is 0', () => {
+describe('World historical calendar', () => {
+  it('from a fresh world getDate() is 01/01/1910 and getElapsedDays() is 0', () => {
     const world = new World(4, 4, { regenerate: false });
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 1 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 1 });
     expect(world.getElapsedDays()).toBe(0);
   });
 
   it('after exactly 1 tick() getDate() is {1,1,2} and getElapsedDays() is 1', () => {
     const world = new World(4, 4, { regenerate: false });
     world.tick();
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 2 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 2 });
     expect(world.getElapsedDays()).toBe(1);
   });
 
-  it('after a total of DAYS_PER_MONTH tick() calls getDate() is {1,2,1}', () => {
+  it('crosses from January to February after 31 ticks', () => {
     const world = new World(4, 4, { regenerate: false });
-    for (let i = 0; i < DAYS_PER_MONTH; i++) world.tick();
-    expect(world.getDate()).toEqual({ year: 1, month: 2, day: 1 });
+    for (let i = 0; i < 31; i++) world.tick();
+    expect(world.getDate()).toEqual({ year: 1910, month: 2, day: 1 });
   });
 
-  it('after a total of DAYS_PER_MONTH*MONTHS_PER_YEAR tick() calls getDate() is {2,1,1}', () => {
+  it('crosses into 1911 after 365 ticks', () => {
     const world = new World(4, 4, { regenerate: false });
-    for (let i = 0; i < DAYS_PER_MONTH * MONTHS_PER_YEAR; i++) world.tick();
-    expect(world.getDate()).toEqual({ year: 2, month: 1, day: 1 });
+    for (let i = 0; i < 365; i++) world.tick();
+    expect(world.getDate()).toEqual({ year: 1911, month: 1, day: 1 });
   });
 
   it('getElapsedDays() equals the total number of tick() calls', () => {
@@ -345,7 +344,7 @@ describe('World calendar', () => {
 
     world.reset();
 
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 1 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 1 });
     expect(world.getElapsedDays()).toBe(0);
     expect(world.getTick()).toBe(0);
   });
@@ -354,10 +353,10 @@ describe('World calendar', () => {
 describe('World.setElapsedDays()', () => {
   it('returns true and sets day and tick together for a valid whole ≥0 value', () => {
     const world = new World(4, 4, { regenerate: false });
-    expect(world.setElapsedDays(DAYS_PER_MONTH)).toBe(true);
-    expect(world.getDate()).toEqual({ year: 1, month: 2, day: 1 });
-    expect(world.getTick()).toBe(DAYS_PER_MONTH);
-    expect(world.getElapsedDays()).toBe(DAYS_PER_MONTH);
+    expect(world.setElapsedDays(31)).toBe(true);
+    expect(world.getDate()).toEqual({ year: 1910, month: 2, day: 1 });
+    expect(world.getTick()).toBe(31);
+    expect(world.getElapsedDays()).toBe(31);
   });
 
   it('returns false and leaves elapsed days / tick / date unchanged for -1', () => {
@@ -365,7 +364,7 @@ describe('World.setElapsedDays()', () => {
     expect(world.setElapsedDays(-1)).toBe(false);
     expect(world.getElapsedDays()).toBe(0);
     expect(world.getTick()).toBe(0);
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 1 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 1 });
   });
 
   it('returns false and leaves elapsed days / tick / date unchanged for Infinity', () => {
@@ -373,7 +372,7 @@ describe('World.setElapsedDays()', () => {
     expect(world.setElapsedDays(Infinity)).toBe(false);
     expect(world.getElapsedDays()).toBe(0);
     expect(world.getTick()).toBe(0);
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 1 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 1 });
   });
 
   it('returns false and leaves elapsed days / tick / date unchanged for NaN', () => {
@@ -381,7 +380,7 @@ describe('World.setElapsedDays()', () => {
     expect(world.setElapsedDays(NaN)).toBe(false);
     expect(world.getElapsedDays()).toBe(0);
     expect(world.getTick()).toBe(0);
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 1 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 1 });
   });
 
   it('returns false and leaves elapsed days / tick / date unchanged for 12.5', () => {
@@ -389,7 +388,7 @@ describe('World.setElapsedDays()', () => {
     expect(world.setElapsedDays(12.5)).toBe(false);
     expect(world.getElapsedDays()).toBe(0);
     expect(world.getTick()).toBe(0);
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 1 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 1 });
   });
 });
 
@@ -400,30 +399,29 @@ describe('World.tick() — monthly tax settlement', () => {
     map.setTile(0, 0, createTile(0, 0, TileType.ZONE_RESIDENTIAL, 1));
     map.setTile(1, 0, createTile(1, 0, TileType.ROAD));
 
-    for (let i = 0; i < DAYS_PER_MONTH - 1; i++) {
+    for (let i = 0; i < 30; i++) {
       const before = world.getMoney();
       world.tick();
-      expect(world.getElapsedDays() % DAYS_PER_MONTH).not.toBe(0);
       expect(world.getMoney()).toBe(before);
     }
   });
 
-  it('on the tick bringing getElapsedDays() to exactly DAYS_PER_MONTH money increases by Math.floor(popBeforeThatTick * TAX_PER_POP) * DAYS_PER_MONTH', () => {
+  it('settles January on the tick entering 01/02/1910 using its 31 days', () => {
     const world = new World(4, 4, { regenerate: false });
     const map = world.getMap();
     map.setTile(0, 0, createTile(0, 0, TileType.ZONE_RESIDENTIAL, 1));
     map.setTile(1, 0, createTile(1, 0, TileType.ROAD));
 
     // Advance to one tick before the M1→M2 boundary (no settlement yet).
-    for (let i = 0; i < DAYS_PER_MONTH - 1; i++) world.tick();
+    for (let i = 0; i < 30; i++) world.tick();
 
     const moneyBeforeBoundary = world.getMoney();
     const popBeforeThatTick = world.getPopulation(); // measured pre-growth, just before the boundary tick
-    world.tick(); // brings getElapsedDays() to DAYS_PER_MONTH
+    world.tick(); // enters 01/02/1910
 
-    expect(world.getElapsedDays()).toBe(DAYS_PER_MONTH);
+    expect(world.getElapsedDays()).toBe(31);
     expect(world.getMoney()).toBe(
-      moneyBeforeBoundary + Math.floor(popBeforeThatTick * TAX_PER_POP) * DAYS_PER_MONTH,
+      moneyBeforeBoundary + Math.floor(popBeforeThatTick * TAX_PER_POP) * 31,
     );
   });
 
@@ -461,7 +459,8 @@ describe('World.tick() — monthly tax settlement', () => {
     // School (5,0)–(6,1): (5,1)/(6,1) adj road (5,2)/(6,2) → road(0,2) 5 hops → ≈0.792.
     seedSchool(world, 5, 0);
 
-    world.setElapsedDays(ZONE_GROWTH_INTERVAL * DAYS_PER_MONTH - 1);
+    // 30/04/1910 is elapsed day 119; the next tick is both 01/05 and tick 120 (divisible by 8).
+    world.setElapsedDays(119);
 
     // Verify road (0,2) is powered and watered, and zone (0,1) inherits both, and is covered.
     expect(world.getPowerMap().isPowered(0, 2)).toBe(true);
@@ -540,7 +539,7 @@ describe('World.reset() — treasury', () => {
     for (let i = 0; i < DAYS_PER_MONTH + 5; i++) world.tick();
     world.reset();
     expect(world.getMoney()).toBe(STARTING_FUNDS);
-    expect(world.getDate()).toEqual({ year: 1, month: 1, day: 1 });
+    expect(world.getDate()).toEqual({ year: 1910, month: 1, day: 1 });
     expect(world.getElapsedDays()).toBe(0);
     expect(world.getTick()).toBe(0);
   });

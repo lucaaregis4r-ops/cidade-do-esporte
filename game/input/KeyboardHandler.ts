@@ -5,10 +5,12 @@
 import { Tool } from '../tools/Tool';
 
 // Local type alias — input layer does not import core types.
-type SpeedTier = 1 | 2 | 3;
+type SpeedTier = 1 | 2 | 4 | 8;
 
 export interface KeyboardCallbacks {
   onToolChange: (tool: Tool) => void;
+  /** Keep inherited municipal shortcuts available only to explicit technical callers. */
+  enableMunicipalTools?: boolean;
   onSpeedChange?: (tier: SpeedTier) => void;
   onPauseToggle?: () => void;
 }
@@ -39,12 +41,13 @@ const KEY_TO_TOOL: Record<string, Tool> = {
 
 /**
  * Speed-tier shortcuts. Mirrors `KEY_TO_TOOL` in shape so input lookups stay symmetric.
- * Plain `1 | 2 | 3` literals — input layer does not import core types.
+ * Keys 1/2/3/4 map to the canonical 1x/2x/4x/8x tiers. Input does not import core types.
  */
 const KEY_TO_SPEED: Record<string, SpeedTier> = {
   '1': 1,
   '2': 2,
-  '3': 3,
+  '3': 4,
+  '4': 8,
 };
 
 export class KeyboardHandler {
@@ -90,7 +93,9 @@ export class KeyboardHandler {
       return;
     }
 
-    const tool = KEY_TO_TOOL[key];
+    const tool = this.callbacks.enableMunicipalTools === false
+      ? (key === 's' || key === 'Escape' ? Tool.SELECT : undefined)
+      : KEY_TO_TOOL[key];
     if (tool) {
       event.preventDefault();
       this.callbacks.onToolChange(tool);

@@ -165,6 +165,10 @@ export class BuildingMap {
     this.nextId = Math.max(this.nextId, id + 1);
   }
 
+  getNextId(): number {
+    return this.nextId;
+  }
+
   clear(): void {
     this.buildings.clear();
     this.tileOwner.fill(-1);

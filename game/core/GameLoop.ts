@@ -3,14 +3,15 @@
  */
 
 import { World } from './World';
+import type { Interruption } from './InterruptionQueue';
 
 export const DEFAULT_TICK_MS = 1000;
 export const MAX_CATCHUP_TICKS = 5;
 
 /** Default wall-clock speed multiplier (1x). */
 export const DEFAULT_SPEED_MULTIPLIER = 1;
-/** Allowed discrete speed tiers — 1x/2x/3x. */
-export const ALLOWED_SPEED_MULTIPLIERS = [1, 2, 3] as const;
+/** Canonical historical-campaign speed tiers — 1x/2x/4x/8x. */
+export const ALLOWED_SPEED_MULTIPLIERS = [1, 2, 4, 8] as const;
 
 export type SpeedMultiplier = typeof ALLOWED_SPEED_MULTIPLIERS[number];
 
@@ -39,6 +40,7 @@ export interface GameLoopTickInfo {
 export class GameLoop {
   private world: World;
   private onTick?: (agg: GameLoopTickInfo) => void;
+  private onAutoPause?: (interruption: Interruption) => void;
   readonly tickMs: number;
   private now: () => number;
 
@@ -56,11 +58,13 @@ export class GameLoop {
     onTick?: (agg: GameLoopTickInfo) => void,
     tickMs: number = DEFAULT_TICK_MS,
     now?: () => number,
+    onAutoPause?: (interruption: Interruption) => void,
   ) {
     this.world = world;
     this.onTick = onTick;
     this.tickMs = tickMs;
     this.now = now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));
+    this.onAutoPause = onAutoPause;
   }
 
   start(): void {
@@ -80,6 +84,15 @@ export class GameLoop {
     // so resuming does not credit the paused interval as elapsed time (no phantom burst).
     if (this.paused) return;
 
+    // Events queued between pumps pause before another historical day advances.
+    const pendingInterruption = this.world.claimAutoPauseInterruption();
+    if (pendingInterruption) {
+      this.paused = true;
+      this.accumulator = 0;
+      this.onAutoPause?.(pendingInterruption);
+      return;
+    }
+
     let scaledElapsed = elapsed;
     // Wall-clock elapsed scaled by speed tier (volatile UI state; no save impact).
     if (this.speedMultiplier !== 1) scaledElapsed *= this.speedMultiplier;
@@ -91,6 +104,7 @@ export class GameLoop {
     // Renderer is idempotent on repeated coords; not deduping.
     const changedTiles: { x: number; y: number }[] = [];
     const changedBuildingIds: number[] = [];
+    let autoPauseInterruption: Interruption | null = null;
     while (this.accumulator >= this.tickMs && drained < MAX_CATCHUP_TICKS) {
       this.accumulator -= this.tickMs;
       const r = this.world.tick();
@@ -98,6 +112,12 @@ export class GameLoop {
       for (const c of r.changedTiles) changedTiles.push(c);
       for (const id of r.changedBuildingIds) changedBuildingIds.push(id);
       drained++;
+      autoPauseInterruption = this.world.claimAutoPauseInterruption();
+      if (autoPauseInterruption) {
+        this.paused = true;
+        this.accumulator = 0;
+        break;
+      }
     }
 
     // Discard over-cap backlog, keep sub-tick remainder
@@ -108,6 +128,7 @@ export class GameLoop {
     if (drained > 0) {
       this.onTick?.({ tick: this.world.getTick(), changed: changedSum, changedTiles, changedBuildingIds });
     }
+    if (autoPauseInterruption) this.onAutoPause?.(autoPauseInterruption);
   }
 
   stop(): void {

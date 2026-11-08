@@ -1,210 +1,46 @@
 'use client';
 
-/**
- * Toolbar component for tool selection
- */
-
-import { Tool, ToolCategory, TOOL_CATEGORY, CATEGORY_ORDER } from '@/game/tools';
+import { Tool } from '@/game/tools';
 
 export interface ToolbarProps {
   currentTool: Tool;
   onToolChange: (tool: Tool) => void;
   paused: boolean;
-  speedMultiplier: 1 | 2 | 3;
+  speedMultiplier: 1 | 2 | 4 | 8;
   onPauseToggle: () => void;
-  onSpeedChange: (tier: 1 | 2 | 3) => void;
+  onSpeedChange: (tier: 1 | 2 | 4 | 8) => void;
 }
 
-interface ToolButton {
-  tool: Tool;
-  label: string;
-  shortcut: string;
-}
+const SPEEDS = [1, 2, 4, 8] as const;
 
-const SPEEDS: { value: 1 | 2 | 3; label: string; shortcut: string }[] = [
-  { value: 1, label: '1x', shortcut: '1' },
-  { value: 2, label: '2x', shortcut: '2' },
-  { value: 3, label: '3x', shortcut: '3' },
-];
-
-const TOOL_BUTTONS: Record<Tool, ToolButton> = {
-  [Tool.SELECT]: { tool: Tool.SELECT, label: 'Select', shortcut: 'S' },
-  [Tool.ROAD]: { tool: Tool.ROAD, label: 'Road', shortcut: 'T' },
-  [Tool.BULLDOZE]: { tool: Tool.BULLDOZE, label: 'Bulldoze', shortcut: 'B' },
-  [Tool.ZONE_RESIDENTIAL]: { tool: Tool.ZONE_RESIDENTIAL, label: 'Residential', shortcut: 'Q' },
-  [Tool.ZONE_COMMERCIAL]: { tool: Tool.ZONE_COMMERCIAL, label: 'Commercial', shortcut: 'W' },
-  [Tool.ZONE_INDUSTRIAL]: { tool: Tool.ZONE_INDUSTRIAL, label: 'Industrial', shortcut: 'E' },
-  [Tool.POWER_PLANT]: { tool: Tool.POWER_PLANT, label: 'Power Plant', shortcut: 'P' },
-  // 'A' (aqua) is used — 'W' is already Commercial; see KeyboardHandler.ts.
-  [Tool.WATER_TOWER]: { tool: Tool.WATER_TOWER, label: 'Water Tower', shortcut: 'A' },
-  [Tool.POLICE_STATION]: { tool: Tool.POLICE_STATION, label: 'Police', shortcut: 'C' },
-  [Tool.FIRE_STATION]: { tool: Tool.FIRE_STATION, label: 'Fire', shortcut: 'D' },
-  [Tool.HOSPITAL]: { tool: Tool.HOSPITAL, label: 'Hospital', shortcut: 'H' },
-  [Tool.SCHOOL]: { tool: Tool.SCHOOL, label: 'School', shortcut: 'L' },
-  [Tool.PARK]: { tool: Tool.PARK, label: 'Park', shortcut: 'K' },
-  [Tool.TERRAIN_UP]: { tool: Tool.TERRAIN_UP, label: 'Raise', shortcut: 'R' },
-  [Tool.TERRAIN_DOWN]: { tool: Tool.TERRAIN_DOWN, label: 'Lower', shortcut: 'F' },
-  [Tool.TERRAIN_LEVEL]: { tool: Tool.TERRAIN_LEVEL, label: 'Level', shortcut: 'G' },
-};
-
-const CATEGORY_LABELS: Record<ToolCategory, string> = {
-  [ToolCategory.CURSOR]: 'Cursor',
-  [ToolCategory.TERRAIN]: 'Terrain',
-  [ToolCategory.BUILD]: 'Build',
-  [ToolCategory.ZONE]: 'Zone',
-  [ToolCategory.POWER]: 'Power',
-  [ToolCategory.WATER]: 'Water',
-  [ToolCategory.POLICE]: 'Police',
-  [ToolCategory.FIRE]: 'Fire',
-  [ToolCategory.HOSPITAL]: 'Hospital',
-  [ToolCategory.SCHOOL]: 'School',
-  [ToolCategory.PARK]: 'Park',
-  [ToolCategory.DEMOLISH]: 'Demolish',
-};
-
-const TOOL_GROUPS = CATEGORY_ORDER.map(cat => ({
-  category: cat,
-  label: CATEGORY_LABELS[cat],
-  tools: (Object.values(Tool) as Tool[]).filter(t => TOOL_CATEGORY[t] === cat).map(t => TOOL_BUTTONS[t]),
-}));
-
+/** The campaign player observes the city; municipal editing remains an internal engine capability. */
 export function Toolbar({ currentTool, onToolChange, paused, speedMultiplier, onPauseToggle, onSpeedChange }: ToolbarProps) {
-  function renderGroup({ label, tools }: { label: string; tools: ToolButton[] }) {
-    return (
-      <div key={label} style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-        <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-          {label}
-        </span>
-        {tools.map(({ tool, label: btnLabel, shortcut }) => (
-          <button
-            key={tool}
-            onClick={() => onToolChange(tool)}
-            title={`${btnLabel} (${shortcut})`}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: currentTool === tool ? 'rgba(74, 158, 61, 0.8)' : 'rgba(60, 60, 60, 0.8)',
-              color: 'white',
-              border: currentTool === tool ? '2px solid rgba(74, 158, 61, 1)' : '2px solid transparent',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontSize: '14px',
-              fontWeight: currentTool === tool ? 'bold' : 'normal',
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-              if (currentTool !== tool) {
-                e.currentTarget.style.backgroundColor = 'rgba(80, 80, 80, 0.8)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (currentTool !== tool) {
-                e.currentTarget.style.backgroundColor = 'rgba(60, 60, 60, 0.8)';
-              }
-            }}
-          >
-            {btnLabel}
-            <span style={{ opacity: 0.6, marginLeft: '8px', fontSize: '12px' }}>
-              [{shortcut}]
-            </span>
-          </button>
-        ))}
-        <div style={{ width: '1px', backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'stretch' }} />
-      </div>
-    );
-  }
-
   return (
-    <div
-      style={{
-        position: 'fixed',
-        bottom: '16px',
-        left: '16px',
-        display: 'flex',
-        flexDirection: 'column',
-        maxWidth: 'calc(100vw - 32px)',
-        gap: '8px',
-        padding: '12px',
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        borderRadius: '8px',
-        zIndex: 1000,
-      }}
-    >
-      {/* Row 1: Tool groups */}
-      <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-        {TOOL_GROUPS.map(group => renderGroup(group))}
-      </div>
-      {/* Row 2: Time controls */}
-      <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-        <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-          Time
-        </span>
+    <div className="campaign-controls" aria-label="Controles da campanha">
+      <button
+        type="button"
+        className={currentTool === Tool.SELECT ? 'active' : ''}
+        onClick={() => onToolChange(Tool.SELECT)}
+        title="Inspecionar parcela ou distrito (S)"
+      >
+        Inspecionar <small>[S]</small>
+      </button>
+      <span className="campaign-control-divider" />
+      <button type="button" className={paused ? 'active' : ''} onClick={onPauseToggle} title={paused ? 'Continuar (Espaço)' : 'Pausar (Espaço)'}>
+        {paused ? 'Continuar' : 'Pausar'} <small>[Espaço]</small>
+      </button>
+      <span className="campaign-control-label">Velocidade</span>
+      {SPEEDS.map((speed, index) => (
         <button
-          onClick={onPauseToggle}
-          title={paused ? 'Play (Space)' : 'Pause (Space)'}
-          style={{
-            padding: '6px 12px',
-            backgroundColor: paused ? 'rgba(74, 158, 61, 0.8)' : 'rgba(60, 60, 60, 0.8)',
-            color: 'white',
-            border: paused ? '2px solid rgba(74, 158, 61, 1)' : '2px solid transparent',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontFamily: 'monospace',
-            fontSize: '14px',
-            fontWeight: paused ? 'bold' : 'normal',
-            transition: 'all 0.2s ease',
-          }}
-          onMouseEnter={(e) => {
-            if (!paused) {
-              e.currentTarget.style.backgroundColor = 'rgba(80, 80, 80, 0.8)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!paused) {
-              e.currentTarget.style.backgroundColor = 'rgba(60, 60, 60, 0.8)';
-            }
-          }}
+          key={speed}
+          type="button"
+          className={speedMultiplier === speed ? 'active' : ''}
+          onClick={() => onSpeedChange(speed)}
+          title={`${speed}x (tecla ${index + 1})`}
         >
-          {paused ? 'Play' : 'Pause'}
-          <span style={{ opacity: 0.6, marginLeft: '8px', fontSize: '12px' }}>
-            [Space]
-          </span>
+          {speed}x <small>[{index + 1}]</small>
         </button>
-        {SPEEDS.map(({ value, label, shortcut }) => (
-          <button
-            key={value}
-            onClick={() => onSpeedChange(value)}
-            title={`${label} (${shortcut})`}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: speedMultiplier === value ? 'rgba(74, 158, 61, 0.8)' : 'rgba(60, 60, 60, 0.8)',
-              color: 'white',
-              border: speedMultiplier === value ? '2px solid rgba(74, 158, 61, 1)' : '2px solid transparent',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontSize: '14px',
-              fontWeight: speedMultiplier === value ? 'bold' : 'normal',
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-              if (speedMultiplier !== value) {
-                e.currentTarget.style.backgroundColor = 'rgba(80, 80, 80, 0.8)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (speedMultiplier !== value) {
-                e.currentTarget.style.backgroundColor = 'rgba(60, 60, 60, 0.8)';
-              }
-            }}
-          >
-            {label}
-            <span style={{ opacity: 0.6, marginLeft: '8px', fontSize: '12px' }}>
-              [{shortcut}]
-            </span>
-          </button>
-        ))}
-      </div>
+      ))}
     </div>
   );
 }

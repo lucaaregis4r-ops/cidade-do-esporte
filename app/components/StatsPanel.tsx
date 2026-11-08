@@ -43,8 +43,11 @@ export function StatsPanel({ samples }: StatsPanelProps) {
           letterSpacing: '1px',
         }}
       >
-        STATISTICS
+        MÉTRICAS DA BASE TÉCNICA
       </div>
+      <p style={{ color: '#cfcfc5', font: '11px/1.4 Arial, sans-serif', margin: '0 0 10px' }}>
+        Séries do motor urbano herdado. Os valores ainda não são dados históricos da campanha.
+      </p>
       <StatChart
         label="Population"
         color="#4caf50"

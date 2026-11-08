@@ -26,6 +26,36 @@ import { SERVICE_COVERAGE_THRESHOLD_RAW } from '../core/ServiceCoverageMap';
 import { buildingCapacity } from '../core/buildingCapacity';
 import { lotBboxOf } from '../core/buildingFootprint';
 import { lotWidthAlongFrontage, maxDensityForLot } from '../core/zoneGrowth';
+import type { CityInstitutionKind } from '../core/city/cityFoundation';
+import type { CityDistrictKind } from '../core/city/cityDistricts';
+import type { CityDevelopmentKind } from '../core/city/cityGrowth';
+import type { CityBuildingRecord, CityCentrality } from '../core/city/cityTransformation';
+import type { ParcelHistoricalEvent, ParcelTransaction } from '../core/city/cityParcels';
+import { createCityState } from '../core/city/CityState';
+import { generateCityLandValue1910, type CityLandValue1910, type LandValueCalibration, type ValuedParcel } from '../core/city/cityLandValue';
+import { CAMPAIGN_PARCEL_VALUATION_PROFILE } from '../core/city/campaignParcelValuationProfile';
+import {
+  getHistoricalCurrency,
+  formatNominalMoney,
+  type HistoricalCurrency,
+  type HistoricalEconomy,
+} from '../core/economy/HistoricalEconomy';
+import type { GameDate } from '../core/HistoricalClock';
+import {
+  evaluateParcelForClub,
+  type ParcelClubViability,
+  type OccupancyType,
+} from '../core/club/ClubLandContract';
+
+export interface ParcelNominalValuation {
+  readonly status: 'available' | 'unavailable';
+  readonly currency: HistoricalCurrency;
+  readonly currencyLabel: 'Réis' | 'Cruzeiros';
+  readonly date: Readonly<GameDate>;
+  readonly amount?: number;
+  readonly formatted?: string;
+  readonly reason?: string;
+}
 
 export interface TileBuildingInfo {
   readonly type: BuildingType;
@@ -39,6 +69,61 @@ export interface TileBuildingInfo {
   readonly lotWidth: number;
   /** Highest density tier this lot's width allows (1 unmerged, 2 once assembled >=2 wide). */
   readonly maxDensity: 1 | 2;
+}
+
+export interface CampaignCityTileInfo {
+  readonly center: boolean;
+  readonly institution: { readonly id: string; readonly kind: CityInstitutionKind; readonly year: 1910 } | null;
+  readonly district: {
+    readonly id: string;
+    readonly kind: CityDistrictKind;
+    readonly landArea: number;
+    readonly populationUnits: number;
+    readonly employmentUnits: number;
+    readonly centrality: number;
+  } | null;
+  readonly parcel: {
+    readonly id: string;
+    readonly districtId: string;
+    readonly area: number;
+    readonly terrainDifficulty: number;
+    readonly ownerId: string | null;
+    readonly landValuePpu: number | null;
+    readonly neighborhoodIncomeIndex: number | null;
+    readonly prestige: number | null;
+    readonly centrality: number;
+    readonly accessibility: number;
+    readonly neighborhoodPopulation: number;
+    readonly roadAccess: number;
+    readonly railAccess: number;
+    readonly purchaseHistory: readonly ParcelTransaction[];
+    readonly historicalEvents: readonly ParcelHistoricalEvent[];
+    readonly valuation: (Pick<ValuedParcel, 'landValuePpu' | 'relativeScore' | 'factors'> & {
+      readonly year: CityLandValue1910['year'];
+      readonly calibrationId: string;
+      readonly references: CityLandValue1910['references'];
+      readonly notes: string;
+      readonly weights: LandValueCalibration['weights'];
+    }) | null;
+    readonly nominalValuation: ParcelNominalValuation | null;
+    readonly clubViability?: ParcelClubViability | null;
+    readonly clubOccupancy?: {
+      readonly clubName: string;
+      readonly contractType: OccupancyType;
+      readonly grantorName: string;
+    } | null;
+  } | null;
+  readonly development: {
+    readonly kind: CityDevelopmentKind;
+    readonly year: number;
+    readonly populationUnitsAdded: number;
+    readonly jobUnitsAdded: number;
+  } | null;
+  readonly transformation: {
+    readonly buildings: readonly CityBuildingRecord[];
+    readonly centrality: CityCentrality | null;
+    readonly avenue: { readonly roadId: string; readonly upgradedYear: number } | null;
+  };
 }
 
 /**
@@ -92,6 +177,133 @@ export interface TileInfo {
   readonly building: TileBuildingInfo | null;
   /** Player-placed structure (e.g. power plant) occupying this tile, if any. */
   readonly structure: { readonly type: StructureType } | null;
+  /** 1910 campaign city identities at this tile, if this World has city metadata. */
+  readonly city: CampaignCityTileInfo | null;
+}
+
+function campaignCityTileInfo(world: World, coord: TileCoord, economy?: HistoricalEconomy): CampaignCityTileInfo | null {
+  const city = world.getCityData1910();
+  if (!city) return null;
+  const institution = city.foundation.institutions.find(({ coordinate }) => coordinate.x === coord.x && coordinate.y === coord.y);
+  const districtId = city.districts.districtByTile[coord.y]?.[coord.x] ?? null;
+  const parcelId = city.parcels.parcelByTile[coord.y]?.[coord.x] ?? null;
+  const district = districtId ? city.districts.districts.find((item) => item.id === districtId) : null;
+  const parcel = parcelId ? city.parcels.parcels.find((item) => item.id === parcelId) : null;
+  const valuationResult = parcel ? generateCityLandValue1910(
+    createCityState(world.getWorldSeed(), { year: 1910, month: 1, day: 1 }),
+    city.parcels,
+    city.districts,
+    city.foundation,
+    CAMPAIGN_PARCEL_VALUATION_PROFILE,
+  ) : null;
+  const valuation = parcel ? valuationResult?.parcels.find((item) => item.parcelId === parcel.id) ?? null : null;
+  const development = parcelId ? world.getCityGrowthState()?.developments.find((item) => item.parcelId === parcelId) : null;
+  const transformationState = world.getCityTransformationState();
+  const buildings = parcelId ? transformationState?.buildings.filter((item) => item.parcelId === parcelId) ?? [] : [];
+  const centrality = parcelId ? transformationState?.centralities.find((item) => item.parcelId === parcelId) ?? null : null;
+  const avenue = transformationState?.avenueUpgrades.find((item) => item.path.some(({ x, y }) => x === coord.x && y === coord.y));
+
+  const campaignDate = world.getDate();
+  const currency = getHistoricalCurrency(campaignDate);
+  const currencyLabel: 'Réis' | 'Cruzeiros' = currency === 'cruzeiro' ? 'Cruzeiros' : 'Réis';
+
+  let nominalValuation: ParcelNominalValuation | null = null;
+  if (parcel && valuation) {
+    if (economy) {
+      try {
+        const nominal = economy.toNominal(valuation.landValuePpu, campaignDate);
+        nominalValuation = {
+          status: 'available',
+          currency: nominal.currency,
+          currencyLabel: nominal.currency === 'cruzeiro' ? 'Cruzeiros' : 'Réis',
+          date: { ...campaignDate },
+          amount: nominal.amount,
+          formatted: formatNominalMoney(nominal),
+        };
+      } catch (err) {
+        nominalValuation = {
+          status: 'unavailable',
+          currency,
+          currencyLabel,
+          date: { ...campaignDate },
+          reason: err instanceof Error ? err.message : String(err),
+        };
+      }
+    } else {
+      nominalValuation = {
+        status: 'unavailable',
+        currency,
+        currencyLabel,
+        date: { ...campaignDate },
+        reason: `Índice de custo de vida não calibrado para ${String(campaignDate.month).padStart(2, '0')}/${campaignDate.year}; pesquisa histórica necessária (Macroetapa 41).`,
+      };
+    }
+  }
+
+  const club = world.getClub();
+  const clubViability = parcel
+    ? evaluateParcelForClub(parcel, Boolean(institution), club ? club.foundingOrigin : 'railway')
+    : null;
+
+  let clubOccupancy: {
+    readonly clubName: string;
+    readonly contractType: OccupancyType;
+    readonly grantorName: string;
+  } | null = null;
+
+  if (parcel && club && club.parcels.includes(parcel.id)) {
+    const activeContract = club.contracts?.find((c) => c.parcelId === parcel.id);
+    clubOccupancy = {
+      clubName: club.name,
+      contractType: activeContract?.type ?? 'COMPRA',
+      grantorName: activeContract?.grantorName ?? 'Particular',
+    };
+  }
+
+  return {
+    center: city.foundation.center.coordinate.x === coord.x && city.foundation.center.coordinate.y === coord.y,
+    institution: institution ? { id: institution.id, kind: institution.kind, year: 1910 } : null,
+    district: district ? {
+      id: district.id, kind: district.kind, landArea: district.landArea,
+      populationUnits: district.populationUnits, employmentUnits: district.employmentUnits,
+      centrality: district.centrality,
+    } : null,
+    parcel: parcel ? {
+      id: parcel.id, districtId: parcel.districtId, area: parcel.area,
+      terrainDifficulty: parcel.terrainDifficulty, ownerId: parcel.ownerId ?? null,
+      landValuePpu: parcel.landValuePpu ?? null,
+      neighborhoodIncomeIndex: parcel.neighborhoodIncomeIndex ?? null,
+      prestige: parcel.prestige ?? null, centrality: parcel.centrality,
+      accessibility: parcel.accessibility, neighborhoodPopulation: parcel.neighborhoodPopulation,
+      roadAccess: parcel.roadAccess, railAccess: parcel.railAccess,
+      purchaseHistory: parcel.purchaseHistory.map((transaction) => ({ ...transaction, date: { ...transaction.date } })),
+      historicalEvents: parcel.historicalEvents.map((event) => ({ ...event, date: { ...event.date } })),
+      valuation: valuation ? {
+        year: valuationResult!.year,
+        calibrationId: valuationResult!.calibrationId,
+        landValuePpu: valuation.landValuePpu,
+        relativeScore: valuation.relativeScore,
+        factors: valuation.factors,
+        references: valuationResult!.references,
+        notes: CAMPAIGN_PARCEL_VALUATION_PROFILE.notes,
+        weights: CAMPAIGN_PARCEL_VALUATION_PROFILE.weights,
+      } : null,
+      nominalValuation,
+      clubViability,
+      clubOccupancy,
+    } : null,
+    development: development ? {
+      kind: development.kind,
+      year: development.year,
+      populationUnitsAdded: development.populationUnitsAdded,
+      jobUnitsAdded: development.jobUnitsAdded,
+    } : null,
+    transformation: {
+      buildings: buildings.map((item) => ({ ...item })),
+      centrality: centrality ? { ...centrality } : null,
+      avenue: avenue ? { roadId: avenue.roadId, upgradedYear: avenue.upgradedYear } : null,
+    },
+  };
 }
 
 /**
@@ -140,7 +352,7 @@ function buildingInfo(building: Building): TileBuildingInfo {
  * Snapshot the inspectable state of a single tile. Returns null for
  * out-of-bounds coordinates (no tile exists there).
  */
-export function inspectTile(world: World, coord: TileCoord): TileInfo | null {
+export function inspectTile(world: World, coord: TileCoord, economy?: HistoricalEconomy): TileInfo | null {
   const tile = world.getMap().getTile(coord.x, coord.y);
   if (tile === null) return null;
 
@@ -245,5 +457,6 @@ export function inspectTile(world: World, coord: TileCoord): TileInfo | null {
     congestionPenalty: world.getLandValue().getCongestionPenalty(gradedCoord.x, gradedCoord.y),
     building: building ? buildingInfo(building) : null,
     structure: structure ? { type: structure.type } : null,
+    city: campaignCityTileInfo(world, coord, economy),
   };
 }

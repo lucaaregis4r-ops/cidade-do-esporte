@@ -3,12 +3,61 @@ import { World } from '../core/World';
 import { TileType, createTile } from '../core/Tile';
 import { inspectTile } from './inspectTile';
 import { SERVICE_COVERAGE_THRESHOLD_RAW } from '../core/ServiceCoverageMap';
+import { HistoricalEconomy, type HistoricalEconomyDataset } from '../core/economy/HistoricalEconomy';
+import { createClub } from '../core/club/Club';
 
 function makeWorld(size = 6): World {
   return new World(size, size, { regenerate: false });
 }
 
 describe('inspectTile', () => {
+  it('reports seed-derived parcel identity, valuation availability and biography from the campaign World', () => {
+    const world = new World(32, 32, { worldSeed: 'CM-1910-C15A1E11' });
+    const city = world.getCityData1910();
+    expect(city).not.toBeNull();
+    const plazaDistrict = city!.districts.districts.find(({ kind }) => kind === 'public-square')!;
+    const industryDistrict = city!.districts.districts.find(({ kind }) => kind === 'small-industry')!;
+    const firstParcel = city!.parcels.parcels.find(({ districtId }) => districtId === plazaDistrict.id)!;
+    const secondParcel = city!.parcels.parcels.find(({ districtId }) => districtId === industryDistrict.id)!;
+    const firstInfo = inspectTile(world, firstParcel.tiles[0])!;
+    const secondInfo = inspectTile(world, secondParcel.tiles[0])!;
+    expect(firstInfo.city?.parcel).toMatchObject({
+      id: firstParcel.id,
+      districtId: firstParcel.districtId,
+      area: firstParcel.area,
+      terrainDifficulty: firstParcel.terrainDifficulty,
+      roadAccess: firstParcel.roadAccess,
+      railAccess: firstParcel.railAccess,
+      ownerId: null,
+      landValuePpu: null,
+      neighborhoodIncomeIndex: null,
+      prestige: null,
+      historicalEvents: firstParcel.historicalEvents,
+      purchaseHistory: [],
+    });
+    expect(firstInfo.city?.parcel?.id).not.toBe(secondInfo.city?.parcel?.id);
+    expect(secondInfo.city?.parcel?.districtId).toBe(secondParcel.districtId);
+    expect(firstInfo.city?.parcel?.historicalEvents[0].kind).toBe('parcel-established');
+    expect(city!.parcels.parcels.every(({ purchaseHistory }) => purchaseHistory.length === 0)).toBe(true);
+    const firstValuation = firstInfo.city?.parcel?.valuation;
+    const secondValuation = secondInfo.city?.parcel?.valuation;
+    expect(firstValuation?.year).toBe(1910);
+    expect(firstValuation?.calibrationId).toBe('b17-visible-parcel-valuation-v1');
+    expect(firstValuation?.landValuePpu).toBeGreaterThan(0);
+    expect(Object.keys(firstValuation!.factors)).toHaveLength(8);
+    expect(firstValuation?.factors).not.toEqual(secondValuation?.factors);
+    expect(firstValuation?.landValuePpu).not.toBe(secondValuation?.landValuePpu);
+    expect(firstValuation?.references[0].notes).toContain('not observed');
+    const replayWorld = new World(32, 32, { worldSeed: 'CM-1910-C15A1E11' });
+    expect(inspectTile(replayWorld, firstParcel.tiles[0])?.city?.parcel?.valuation).toEqual(firstValuation);
+
+    const landmark = city!.foundation.institutions.find(({ kind }) => kind === 'railway-station')!;
+    const landmarkInfo = inspectTile(world, landmark.coordinate)!;
+    expect(landmarkInfo.city?.institution).toEqual({ id: landmark.id, kind: 'railway-station', year: 1910 });
+    expect(landmarkInfo.city?.district?.id).toBe(city!.districts.districtByTile[landmark.coordinate.y][landmark.coordinate.x]);
+    expect(landmarkInfo.city?.district?.populationUnits).toBeGreaterThan(0);
+  });
+
   it('returns null for out-of-bounds coordinates', () => {
     const world = makeWorld();
     expect(inspectTile(world, { x: -1, y: 0 })).toBeNull();
@@ -768,6 +817,141 @@ describe('inspectTile', () => {
       expect(info.isSchoolSource).toBe(false);
       expect(info.schoolCoverage).toBe(0);
       expect(info.schoolServiceCovered).toBe(false);
+    });
+  });
+
+  describe('nominal valuation (B18)', () => {
+    it('reports honest unavailability in réis before November 1942 and cruzeiros after, without inventing values', () => {
+      const world = new World(32, 32, { worldSeed: 'CM-1910-C15A1E11' });
+      const city = world.getCityData1910()!;
+      const parcel = city.parcels.parcels[0];
+      const tile = parcel.tiles[0];
+
+      // Day 0: 01/01/1910 (before reform)
+      const info1910 = inspectTile(world, tile)!;
+      expect(info1910.city?.parcel?.nominalValuation).toEqual({
+        status: 'unavailable',
+        currency: 'reis',
+        currencyLabel: 'Réis',
+        date: { year: 1910, month: 1, day: 1 },
+        reason: 'Índice de custo de vida não calibrado para 01/1910; pesquisa histórica necessária (Macroetapa 41).',
+      });
+
+      // Day 11991: 31/10/1942 (day before reform)
+      world.setElapsedDays(11991);
+      const infoOct1942 = inspectTile(world, tile)!;
+      expect(infoOct1942.city?.parcel?.nominalValuation).toEqual({
+        status: 'unavailable',
+        currency: 'reis',
+        currencyLabel: 'Réis',
+        date: { year: 1942, month: 10, day: 31 },
+        reason: 'Índice de custo de vida não calibrado para 10/1942; pesquisa histórica necessária (Macroetapa 41).',
+      });
+
+      // Day 11992: 01/11/1942 (reform effective date)
+      world.setElapsedDays(11992);
+      const infoNov1942 = inspectTile(world, tile)!;
+      expect(infoNov1942.city?.parcel?.nominalValuation).toEqual({
+        status: 'unavailable',
+        currency: 'cruzeiro',
+        currencyLabel: 'Cruzeiros',
+        date: { year: 1942, month: 11, day: 1 },
+        reason: 'Índice de custo de vida não calibrado para 11/1942; pesquisa histórica necessária (Macroetapa 41).',
+      });
+    });
+
+    it('converts to nominal réis and cruzeiros when an economy with cited observations is provided', () => {
+      const world = new World(32, 32, { worldSeed: 'CM-1910-C15A1E11' });
+      const city = world.getCityData1910()!;
+      const parcel = city.parcels.parcels[0];
+      const tile = parcel.tiles[0];
+
+      const syntheticDataset: HistoricalEconomyDataset = {
+        version: 1,
+        baseDate: { year: 1910, month: 1 },
+        baseNominalReisPerPpu: 1_000,
+        costOfLiving: [
+          { year: 1910, month: 1, index: 100, references: [{ id: 'test-1910', source: 'Test archive', notes: 'Fixture.' }] },
+          { year: 1942, month: 11, index: 250, references: [{ id: 'test-1942', source: 'Test archive', notes: 'Fixture.' }] },
+        ],
+      };
+      const economy = new HistoricalEconomy(syntheticDataset);
+
+      // In 1910 with cited index: available in réis
+      const info1910 = inspectTile(world, tile, economy)!;
+      const nominal1910 = info1910.city!.parcel!.nominalValuation!;
+      expect(nominal1910.status).toBe('available');
+      expect(nominal1910.currency).toBe('reis');
+      expect(nominal1910.currencyLabel).toBe('Réis');
+      expect(nominal1910.amount).toBeGreaterThan(0);
+      expect(nominal1910.formatted).toMatch(/^Rs \d+:\d{3}\$\d{3}$|^Rs \d+\$\d{3}$/);
+
+      // In November 1942 with cited index: available in cruzeiros
+      world.setElapsedDays(11992);
+      const info1942 = inspectTile(world, tile, economy)!;
+      const nominal1942 = info1942.city!.parcel!.nominalValuation!;
+      expect(nominal1942.status).toBe('available');
+      expect(nominal1942.currency).toBe('cruzeiro');
+      expect(nominal1942.currencyLabel).toBe('Cruzeiros');
+      expect(nominal1942.amount).toBeGreaterThan(0);
+      expect(nominal1942.formatted).toContain('Cr$');
+
+      // In a month without observation: unavailable with exact reason
+      world.setElapsedDays(31); // 01/02/1910
+      const infoFeb1910 = inspectTile(world, tile, economy)!;
+      expect(infoFeb1910.city?.parcel?.nominalValuation?.status).toBe('unavailable');
+      expect(infoFeb1910.city?.parcel?.nominalValuation?.reason).toContain('No cited cost-of-living index for 1910-02');
+    });
+
+    it('reports club suitability and active occupancy when club acquires parcel (C4/C5)', () => {
+      const world = new World(32, 32, { worldSeed: 'club-inspection-seed' });
+      const city = world.getCityData1910()!;
+      const parcel = city.parcels.parcels[0];
+      const tile = parcel.tiles[0];
+      const initialInfo = inspectTile(world, tile)!;
+
+      expect(initialInfo.city).not.toBeNull();
+      expect(initialInfo.city!.parcel).not.toBeNull();
+      expect(initialInfo.city!.parcel!.clubViability).toBeDefined();
+      expect(initialInfo.city!.parcel!.clubViability!.viable).toBe(true);
+      expect(initialInfo.city!.parcel!.clubViability!.suitabilityScore).toBeGreaterThan(0);
+      expect(initialInfo.city!.parcel!.clubOccupancy).toBeNull();
+
+      // Establish club on this parcel
+      const parcelId = initialInfo.city!.parcel!.id;
+      const contract = {
+        id: `contract-${parcelId}`,
+        parcelId,
+        clubId: 'club-test-1910',
+        type: 'COMPRA' as const,
+        startDate: { year: 1910, month: 1, day: 1 },
+        upfrontCostPpu: 50,
+        monthlyCostPpu: 0,
+        grantorName: 'Proprietário Local',
+        terms: ['Clube adquire o terreno para sua praça de esportes'],
+      };
+
+      const club = {
+        id: 'club-test-1910',
+        name: 'Ferroviário Atlético Clube',
+        shortName: 'FAC',
+        foundingDate: { year: 1910, month: 1, day: 1 },
+        foundingOrigin: 'railway' as const,
+        colors: { primary: '#111111', secondary: '#ffffff' },
+        crestHistory: [{ startYear: 1910, designId: 'crest-1', changeReason: 'Inaugural' }],
+        founders: ['person-1'],
+        parcels: [],
+        facilities: [],
+        reputation: 15,
+      };
+
+      const founded = world.foundClubWithParcel(createClub(club), parcelId, contract);
+      expect(founded).toBe(true);
+
+      const updatedInfo = inspectTile(world, tile)!;
+      expect(updatedInfo.city!.parcel!.clubOccupancy).not.toBeNull();
+      expect(updatedInfo.city!.parcel!.clubOccupancy!.clubName).toBe('Ferroviário Atlético Clube');
+      expect(updatedInfo.city!.parcel!.clubOccupancy!.contractType).toBe('COMPRA');
     });
   });
 });

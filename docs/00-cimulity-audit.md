@@ -72,7 +72,7 @@ Core não depende das camadas de interface em código de produção.
 
 ### Tempo e simulação
 
-`GameLoop` usa timestep fixo de 1.000 ms, velocidades 1x/2x/3x e até cinco ticks de recuperação. Cada tick chama `World.tick`; no modelo atual um tick equivale a um dia. O calendário é 0-based, com 30 dias por mês e 12 meses por ano. A6 deve manter o loop e substituir a interpretação temporal pelo `HistoricalClock` 1910–1959.
+O baseline auditado usava timestep fixo de 1.000 ms, velocidades 1x/2x/3x e calendário 0-based de 30 dias por mês. A6 preservou o loop e substituiu essa interpretação por `HistoricalClock` gregoriano de 01/01/1910 a 31/12/1959, com cadências diária/semanal/mensal/anual e velocidades 1x/2x/4x/8x.
 
 ### Mutação e renderização
 
@@ -151,4 +151,4 @@ A arquitetura L0/L1/L2 e os testes longos das Macroetapas 38–40 continuam obri
 - [x] Riscos e próximos gates registrados.
 - [ ] Smoke visual manual, bloqueado pelo ambiente nesta execução.
 
-A2 permanece como a auditoria de referência. A3 já transformou suas fronteiras em testes automáticos; a próxima fronteira é A4, `worldSeed` e streams RNG independentes.
+A2 permanece como a auditoria histórica de referência da base. A3–A10 entregaram fronteiras automáticas, RNG, relógio, interrupções, save v21, replay e execução headless; os achados acima descrevem a revisão auditada, não o estado atual. Alpha A está concluído; consultar `docs/CONTEXTO.md`, `docs/save-format.md` e `docs/reproducibility.md` para o estado vigente.

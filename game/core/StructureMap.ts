@@ -181,6 +181,10 @@ export class StructureMap {
     this.nextId = Math.max(this.nextId, id + 1);
   }
 
+  getNextId(): number {
+    return this.nextId;
+  }
+
   clear(): void {
     this.structures.clear();
     this.tileOwner.fill(-1);

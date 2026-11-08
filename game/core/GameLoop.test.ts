@@ -302,21 +302,21 @@ describe('GameLoop', () => {
     expect(world.getTick()).toBe(2);
   });
 
-  // (p) Speed multiplier 3x: TICK_MS wall-clock drains exactly 3 ticks in one notification
-  it('(p) speed multiplier 3x: TICK_MS wall-clock drains exactly 3 ticks in one notification', () => {
+  // (p) Speed multiplier 4x: TICK_MS wall-clock drains exactly 4 ticks in one notification
+  it('(p) speed multiplier 4x: TICK_MS wall-clock drains exactly 4 ticks in one notification', () => {
     loop.start();
-    loop.setSpeedMultiplier(3);
+    loop.setSpeedMultiplier(4);
     fakeNow += TICK_MS;
     pump();
-    expect(world.getTick()).toBe(3);
+    expect(world.getTick()).toBe(4);
     expect(onTick).toHaveBeenCalledOnce();
-    expect(onTick).toHaveBeenCalledWith({ tick: 3, changed: 0, changedTiles: [], changedBuildingIds: [] });
+    expect(onTick).toHaveBeenCalledWith({ tick: 4, changed: 0, changedTiles: [], changedBuildingIds: [] });
   });
 
   // (q) MAX_CATCHUP_TICKS still caps at higher speed
   it('(q) MAX_CATCHUP_TICKS still caps at higher speed', () => {
     loop.start();
-    loop.setSpeedMultiplier(3);
+    loop.setSpeedMultiplier(8);
     fakeNow += TICK_MS * 10; // would produce 30 ticks unbounded
     pump();
     expect(world.getTick()).toBe(MAX_CATCHUP_TICKS);
@@ -350,10 +350,11 @@ describe('GameLoop', () => {
 
   // (s) setSpeedMultiplier rejects invalid values without mutating
   it('(s) setSpeedMultiplier rejects invalid values without mutating', () => {
-    // Cast via `unknown` to bypass the `SpeedMultiplier = 1 | 2 | 3` union so we
+    // Cast via `unknown` to bypass the canonical speed union so we
     // can verify runtime rejection of out-of-tier values without using `any`.
     expect(loop.setSpeedMultiplier(0 as unknown as SpeedMultiplier)).toBe(false);
-    expect(loop.setSpeedMultiplier(4 as unknown as SpeedMultiplier)).toBe(false);
+    expect(loop.setSpeedMultiplier(3 as unknown as SpeedMultiplier)).toBe(false);
+    expect(loop.setSpeedMultiplier(16 as unknown as SpeedMultiplier)).toBe(false);
     expect(loop.setSpeedMultiplier(1.5 as unknown as SpeedMultiplier)).toBe(false);
     expect(loop.setSpeedMultiplier(-1 as unknown as SpeedMultiplier)).toBe(false);
     expect(loop.setSpeedMultiplier(NaN as unknown as SpeedMultiplier)).toBe(false);
@@ -369,7 +370,7 @@ describe('GameLoop', () => {
   // (u) DEFAULT_SPEED_MULTIPLIER and ALLOWED_SPEED_MULTIPLIERS exports
   it('(u) DEFAULT_SPEED_MULTIPLIER and ALLOWED_SPEED_MULTIPLIERS exports', () => {
     expect(DEFAULT_SPEED_MULTIPLIER).toBe(1);
-    expect(ALLOWED_SPEED_MULTIPLIERS).toEqual([1, 2, 3]);
+    expect(ALLOWED_SPEED_MULTIPLIERS).toEqual([1, 2, 4, 8]);
   });
 
   // (v) changedTiles aggregation across catch-up ticks
@@ -493,5 +494,87 @@ describe('GameLoop', () => {
     // flipped the probe to derelict.
     expect(bigMap.getBuildings().getBuilding(b.id)!.abandoned).toBe(false);
     expect(bigMap.getBuildings().getBuilding(b.id)!.density).toBe(1);
+  });
+
+  it('auto-pauses before advancing when an eligible interruption is already queued', () => {
+    const onAutoPause = vi.fn();
+    const interruptionLoop = new GameLoop(world, onTick, TICK_MS, () => fakeNow, onAutoPause);
+    world.enqueueInterruption({ id: 'election-1910', kind: 'election', title: 'Club election' });
+
+    interruptionLoop.start();
+    fakeNow += TICK_MS;
+    pump();
+
+    expect(interruptionLoop.isPaused()).toBe(true);
+    expect(world.getTick()).toBe(0);
+    expect(onTick).not.toHaveBeenCalled();
+    expect(onAutoPause).toHaveBeenCalledOnce();
+    expect(onAutoPause.mock.calls[0][0].id).toBe('election-1910');
+    interruptionLoop.stop();
+  });
+
+  it('does not auto-pause a disabled interruption kind', () => {
+    const onAutoPause = vi.fn();
+    const interruptionLoop = new GameLoop(world, onTick, TICK_MS, () => fakeNow, onAutoPause);
+    world.setAutoPause('proposal', false);
+    world.enqueueInterruption({ id: 'proposal-1910', kind: 'proposal', title: 'Land proposal' });
+
+    interruptionLoop.start();
+    fakeNow += TICK_MS;
+    pump();
+
+    expect(interruptionLoop.isPaused()).toBe(false);
+    expect(world.getTick()).toBe(1);
+    expect(onAutoPause).not.toHaveBeenCalled();
+    interruptionLoop.stop();
+  });
+
+  it('stops a catch-up burst on the event day and discards its backlog', () => {
+    const onAutoPause = vi.fn();
+    const interruptionLoop = new GameLoop(world, onTick, TICK_MS, () => fakeNow, onAutoPause);
+    const tick = world.tick.bind(world);
+    const tickSpy = vi.spyOn(world, 'tick').mockImplementation(() => {
+      const result = tick();
+      if (world.getTick() === 1) {
+        world.enqueueInterruption({ id: 'during-tick', kind: 'construction', title: 'Work completed' });
+      }
+      return result;
+    });
+    interruptionLoop.setSpeedMultiplier(8);
+    interruptionLoop.start();
+    fakeNow += TICK_MS * 10;
+    pump();
+    expect(world.getTick()).toBe(1);
+    expect(interruptionLoop.isPaused()).toBe(true);
+    expect(onTick).toHaveBeenCalledOnce();
+    expect(onAutoPause).toHaveBeenCalledOnce();
+    expect(onTick.mock.invocationCallOrder[0]).toBeLessThan(onAutoPause.mock.invocationCallOrder[0]);
+
+    interruptionLoop.setPaused(false);
+    pump();
+    expect(world.getTick()).toBe(1);
+    interruptionLoop.stop();
+    tickSpy.mockRestore();
+  });
+
+  it('claims each interruption once so resume cannot immediately pause on the same item', () => {
+    const onAutoPause = vi.fn();
+    const interruptionLoop = new GameLoop(world, onTick, TICK_MS, () => fakeNow, onAutoPause);
+    world.enqueueInterruption({ id: 'crisis-1910', kind: 'crisis', title: 'Financial crisis' });
+
+    interruptionLoop.start();
+    fakeNow += TICK_MS;
+    pump();
+    expect(interruptionLoop.isPaused()).toBe(true);
+
+    interruptionLoop.setPaused(false);
+    fakeNow += TICK_MS;
+    pump();
+
+    expect(interruptionLoop.isPaused()).toBe(false);
+    expect(world.getTick()).toBe(1);
+    expect(onAutoPause).toHaveBeenCalledOnce();
+    expect(world.getInterruptions()).toHaveLength(1);
+    interruptionLoop.stop();
   });
 });

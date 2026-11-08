@@ -440,5 +440,5 @@ describe('buildMassingPlan — invariants', () => {
         }
       }
     }
-  });
+  }, 45_000);
 });

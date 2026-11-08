@@ -19,7 +19,7 @@ import * as terrainGeneratorModule from './terrainGenerator';
 // the fake localStorage at import-resolution time (but the functions call
 // `typeof localStorage` at runtime, so we just need the global in place when
 // they run).
-import { getWorld, saveWorld } from './worldStore';
+import { getWorld, saveWorld, STORAGE_KEY } from './worldStore';
 
 // ---- fake localStorage ----
 
@@ -40,8 +40,6 @@ function makeFakeStorage(): FakeStorage {
   };
 }
 
-// The storage key mirrors the constant in worldStore.ts (v19 cut).
-const STORAGE_KEY = 'cimulity:save:v19';
 
 // ---- singleton reset helper ----
 
@@ -171,7 +169,7 @@ describe('getWorld — sentinel: Test A — API probe fails → fresh World', ()
     };
     // Set the current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -191,7 +189,7 @@ describe('getWorld — sentinel: stub missing getServiceCoverageMap → fresh Wo
     (globalThis as any).__cimulityWorld = stale;
     // Current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -227,7 +225,7 @@ describe('getWorld — sentinel: Test C — both checks pass → cached instance
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).__cimulityWorld = real;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -236,13 +234,13 @@ describe('getWorld — sentinel: Test C — both checks pass → cached instance
 });
 
 describe('getWorld — sentinel: Test D — no pre-seed → fresh World + guard set', () => {
-  it('builds a fresh World and writes service-v18 to globalThis.__cimulityWorldGuard', () => {
+  it('builds a fresh World and writes cidade-save-v25 to globalThis.__cimulityWorldGuard', () => {
     // Singleton and guard are already cleared by beforeEach (resetSingleton).
     const result = getWorld();
 
     expect(result).toBeInstanceOf(World);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((globalThis as any).__cimulityWorldGuard).toBe('service-v18');
+    expect((globalThis as any).__cimulityWorldGuard).toBe('cidade-save-v25');
   });
 });
 
@@ -255,7 +253,7 @@ describe('getWorld — spy: generateTerrain call count', () => {
 
   it('valid current-version save: generateTerrain is NOT called (0 times)', () => {
     // Pre-populate localStorage with a valid current-version save (constructed before spy is active).
-    const src = new World(64, 64, { regenerate: true });
+    const src = new World(64, 64, { regenerate: false });
     fakeStorage.setItem(STORAGE_KEY, serializeWorld(src));
 
     // Now spy — any call from here on is captured.
@@ -344,7 +342,7 @@ describe('getWorld — stale singleton missing getDemand is discarded', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).__cimulityWorld = stale;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -368,7 +366,7 @@ describe('WORLD_SINGLETON_GUARD invalidates stale HMR singletons', () => {
     // Calling getWorld() should detect the guard mismatch and build a fresh world:
     const fresh = getWorld();
     expect(fresh).not.toBe(stale);
-    expect(globals.__cimulityWorldGuard).toBe('service-v18');
+    expect(globals.__cimulityWorldGuard).toBe('cidade-save-v25');
   });
 });
 
@@ -399,7 +397,7 @@ describe('getWorld — sentinel: stub missing getFireCoverageMap → fresh World
     (globalThis as any).__cimulityWorld = stale;
     // Current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -422,7 +420,7 @@ describe('getWorld — sentinel: stub missing getHospitalCoverageMap → fresh W
     (globalThis as any).__cimulityWorld = stale;
     // Current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -445,7 +443,7 @@ describe('getWorld — sentinel: stub missing getSchoolCoverageMap → fresh Wor
     (globalThis as any).__cimulityWorld = stale;
     // Current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -468,7 +466,7 @@ describe('getWorld — sentinel: stub missing getHappiness → fresh World', () 
     (globalThis as any).__cimulityWorld = stale;
     // Current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -488,7 +486,7 @@ describe('getWorld — sentinel: stub missing getTrafficMap → fresh World', ()
     (globalThis as any).__cimulityWorld = stale;
     // Current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 
@@ -511,7 +509,7 @@ describe('getWorld — sentinel: stub missing getLaborMarket → fresh World', (
     (globalThis as any).__cimulityWorld = stale;
     // Current sentinel so only the API probe causes the discard.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).__cimulityWorldGuard = 'service-v18';
+    (globalThis as any).__cimulityWorldGuard = 'cidade-save-v25';
 
     const result = getWorld();
 

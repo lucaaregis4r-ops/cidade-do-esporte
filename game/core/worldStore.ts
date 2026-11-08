@@ -21,35 +21,39 @@ import { serializeWorld, deserializeWorldInto } from './mapSerialization';
 
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
-// Storage key bumped to 'cimulity:save:v19' to match WORLD_SAVE_VERSION = 19.
-// Legacy saves at ':v18 and earlier' remain in localStorage untouched but are never read.
-// First save under this key always creates fresh data (no silent overwrite of stale data).
-const STORAGE_KEY = 'cimulity:save:v19';
+// Native v25 writes never overwrite retained migration sources.
+export const STORAGE_KEY = 'cimulity:save:v25';
+export const PREVIOUS_STORAGE_KEY = 'cimulity:save:v24';
+export const V23_STORAGE_KEY = 'cimulity:save:v23';
+export const V22_STORAGE_KEY = 'cimulity:save:v22';
+export const V21_STORAGE_KEY = 'cimulity:save:v21';
+export const V20_STORAGE_KEY = 'cimulity:save:v20';
+export const LEGACY_STORAGE_KEY = 'cimulity:save:v19';
+let readFailed = false;
 
-// Bumped from 'service-v17' to 'service-v18' for three behavioural changes to World.tick that
-// `hasCurrentWorldApi` cannot detect, all landed together (the reasoning behind them lives at
-// the abandonment sweep in World.tick, not here):
-//   1. the sweep reads the congestion-free land value instead of the congested one;
-//   2. the density-bump branch gained the congested land-value gate that switch un-deadened;
-//   3. the derelict freeze moved after the age++, so an abandoned building that still has road
-//      access and power keeps aging.
-// The method probe cannot see any of it — the one new method, LandValueMap.getUncongestedValue,
-// is not on the probed surface either (LandValueMap has no entry there). A retained singleton
-// would keep condemning congested buildings for the rest of the session; the save format is
-// untouched at v19.
-const WORLD_SINGLETON_GUARD = 'service-v18' as const;
+export function getPersistenceNotice(): string | null {
+  return store.__cimulityPersistenceNotice ?? null;
+}
+
+// A8 adds queue snapshot APIs and entity counters required by persistence.
+const WORLD_SINGLETON_GUARD = 'cidade-save-v25' as const;
 
 const store = globalThis as unknown as {
   __cimulityWorld?: World;
   __cimulityWorldGuard?: string;
+  __cimulityPersistenceNotice?: string | null;
+  __cimulityBlockedWorld?: World | null;
 };
 
 function readSave(): string | null {
+  readFailed = false;
   try {
     return typeof localStorage === 'undefined'
       ? null
-      : localStorage.getItem(STORAGE_KEY);
+      : localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(PREVIOUS_STORAGE_KEY) ?? localStorage.getItem(V23_STORAGE_KEY) ?? localStorage.getItem(V22_STORAGE_KEY) ?? localStorage.getItem(V21_STORAGE_KEY) ?? localStorage.getItem(V20_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
   } catch {
+    readFailed = true;
+    store.__cimulityPersistenceNotice = 'Save storage is unavailable. Your existing save has not been changed.';
     return null;
   }
 }
@@ -67,7 +71,7 @@ function readSave(): string | null {
  * `GameMap`, `BuildingMap`, or `StructureMap` — stale HMR singletons missing
  * the method break the app.**
  *
- * Checked methods (as of service-v18 / v19). The list itself has not moved since service-v15 —
+ * Checked methods (as of cidade-save-v24).
  * v16, v17 and v18 were behavioural `World.tick` bumps that added no method to this surface — but
  * the stamp tracks the guard so a reader can tell at a glance that it was reviewed against the
  * current sentinel:
@@ -85,7 +89,9 @@ function readSave(): string | null {
  *          getTrafficMap, markTrafficDirty, recomputeTrafficIfDirty, recomputeTraffic,
  *          getLaborMarket, markLaborDirty, recomputeLaborIfDirty, recomputeLabor,
  *          getEmployed, getUnemployed, getJobsCapacity,
- *          getStructureMap
+ *          getStructureMap, getWorldSeed, getRngStreams, isCampaignComplete,
+ *          enqueueInterruption, getInterruptions, acknowledgeInterruption,
+ *          setAutoPause, getAutoPauseConfig, claimAutoPauseInterruption
  *   GameMap: getBuildings, setTileAndReconcile
  *   BuildingMap: getBuildingAt, getBuilding, iterBuildings, getAllBuildings,
  *                addBuilding, addExistingBuilding, removeBuilding, setNextIdFloor, clear
@@ -94,6 +100,34 @@ function readSave(): string | null {
  *   Building.frontage: required Frontage field (added v9)
  */
 function hasCurrentWorldApi(world: World): boolean {
+  if (
+    typeof world.getWorldSeed !== 'function' ||
+    typeof world.getCityFoundation1910 !== 'function' ||
+    typeof world.getCityDistricts1910 !== 'function' ||
+    typeof world.getCityParcels1910 !== 'function' ||
+    typeof world.getCityGrowthState !== 'function' ||
+    typeof world.setCityGrowthState !== 'function' ||
+    typeof world.getCityTransformationState !== 'function' ||
+    typeof world.setCityTransformationState !== 'function' ||
+    typeof world.setCityData1910 !== 'function' ||
+    typeof world.getClub !== 'function' ||
+    typeof world.setClub !== 'function' ||
+    typeof world.getRngStreams !== 'function' ||
+    typeof world.getDecisionLog !== 'function' ||
+    typeof world.recordDecision !== 'function' ||
+    typeof world.restoreDecisionLog !== 'function' ||
+    typeof world.isCampaignComplete !== 'function' ||
+    typeof world.enqueueInterruption !== 'function' ||
+    typeof world.getInterruptions !== 'function' ||
+    typeof world.getInterruptionState !== 'function' ||
+    typeof world.restoreInterruptionState !== 'function' ||
+    typeof world.acknowledgeInterruption !== 'function' ||
+    typeof world.setAutoPause !== 'function' ||
+    typeof world.getAutoPauseConfig !== 'function' ||
+    typeof world.claimAutoPauseInterruption !== 'function'
+  ) {
+    return false;
+  }
   // World economy + calendar APIs (existing).
   if (
     typeof world.getMoney !== 'function' ||
@@ -125,6 +159,7 @@ function hasCurrentWorldApi(world: World): boolean {
     typeof buildings.addExistingBuilding !== 'function' ||
     typeof buildings.removeBuilding !== 'function' ||
     typeof buildings.setNextIdFloor !== 'function' ||
+    typeof buildings.getNextId !== 'function' ||
     typeof buildings.clear !== 'function'
   ) {
     return false;
@@ -246,6 +281,7 @@ function hasCurrentWorldApi(world: World): boolean {
     typeof structures.addExistingStructure !== 'function' ||
     typeof structures.removeStructure !== 'function' ||
     typeof structures.setNextIdFloor !== 'function' ||
+    typeof structures.getNextId !== 'function' ||
     typeof structures.clear !== 'function'
   ) {
     return false;
@@ -259,13 +295,16 @@ export function getWorld(): World {
     !hasCurrentWorldApi(store.__cimulityWorld) ||
     store.__cimulityWorldGuard !== WORLD_SINGLETON_GUARD
   ) {
+    store.__cimulityPersistenceNotice = null;
     const save = readSave();
     let world: World;
-    if (save) {
+    if (save !== null) {
       // Save present: construct without procedural generation, then hydrate.
       world = new World(MAP_WIDTH, MAP_HEIGHT, { regenerate: false });
       const ok = deserializeWorldInto(world, save);
       if (!ok) {
+        store.__cimulityBlockedWorld = world;
+        store.__cimulityPersistenceNotice = 'Save could not be loaded. Original data is preserved; autosave is blocked. Back up browser storage before choosing New City.';
         // Bad/corrupt save — fall back to procedural generation.
         world.reset({ regenerate: true });
         world.recomputePowerIfDirty();
@@ -274,11 +313,24 @@ export function getWorld(): World {
         world.recomputeFireIfDirty();
         world.recomputeHospitalIfDirty();
         world.recomputeSchoolIfDirty();
+      } else if (JSON.parse(save).v === 19) {
+        store.__cimulityPersistenceNotice = 'Save v19 migrated. Original retained in cimulity:save:v19. Missing seed, RNG, queue and decision state received explicit defaults; elapsed days are interpreted from 1 January 1910.';
+      } else if (JSON.parse(save).v === 20) {
+        store.__cimulityPersistenceNotice = 'Save v20 migrated. Original retained in cimulity:save:v20; its decision log starts empty because v20 did not record decisions.';
+      } else if (JSON.parse(save).v === 21) {
+        store.__cimulityPersistenceNotice = 'Save v21 migrated. Original retained in cimulity:save:v21; city generation metadata is absent, so the saved map was preserved without generating a city over it.';
+      } else if (JSON.parse(save).v === 22) {
+        store.__cimulityPersistenceNotice = 'Save v22 migrated. Original retained in cimulity:save:v22; the city baseline was preserved and annual growth begins from the saved year.';
+      } else if (JSON.parse(save).v === 23) {
+        store.__cimulityPersistenceNotice = 'Save v23 migrated. Original retained in cimulity:save:v23; B15 history was reconstructed from the recorded B14 growth ledger.';
+      } else if (JSON.parse(save).v === 24) {
+        store.__cimulityPersistenceNotice = 'Save v24 migrated. Original retained in cimulity:save:v24; club state starts empty.';
       }
     } else {
       // No save — fresh procedural world.
       world = new World(MAP_WIDTH, MAP_HEIGHT, { regenerate: true });
     }
+    if (readFailed) store.__cimulityBlockedWorld = world;
     store.__cimulityWorld = world;
     store.__cimulityWorldGuard = WORLD_SINGLETON_GUARD;
   }
@@ -286,12 +338,19 @@ export function getWorld(): World {
 }
 
 /** Persist the current map. Best-effort: storage may be full or blocked. */
-export function saveWorld(world: World): void {
+export function saveWorld(world: World): boolean {
+  if (store.__cimulityBlockedWorld === world) return false;
   try {
-    if (typeof localStorage === 'undefined') return;
+    if (typeof localStorage === 'undefined') {
+      store.__cimulityPersistenceNotice = 'Save storage is unavailable; progress has not been saved.';
+      return false;
+    }
     localStorage.setItem(STORAGE_KEY, serializeWorld(world));
+    if (getPersistenceNotice()?.startsWith('Saving failed') || getPersistenceNotice()?.startsWith('Save storage is unavailable')) store.__cimulityPersistenceNotice = null;
+    return true;
   } catch {
-    // Quota exceeded / private mode — drop the save silently.
+    store.__cimulityPersistenceNotice = 'Saving failed (storage full or unavailable). The previous save is unchanged.';
+    return false;
   }
 }
 
@@ -300,7 +359,15 @@ export function clearSave(): void {
   try {
     if (typeof localStorage === 'undefined') return;
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(PREVIOUS_STORAGE_KEY);
+    localStorage.removeItem(V23_STORAGE_KEY);
+    localStorage.removeItem(V22_STORAGE_KEY);
+    localStorage.removeItem(V21_STORAGE_KEY);
+    localStorage.removeItem(V20_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    store.__cimulityBlockedWorld = null;
+    store.__cimulityPersistenceNotice = null;
   } catch {
-    // Ignore — nothing to clean up if storage is unavailable.
+    store.__cimulityPersistenceNotice = 'Could not clear the saved campaign. Storage is unavailable.';
   }
 }

@@ -44,12 +44,29 @@ Se houver conflito ou lacuna material, não preencher por suposição. Registrar
 - Cidade de Minas é fictícia e não pode se tornar uma reconstrução de Belo Horizonte.
 - O jogador representa a continuidade institucional do clube e não controla a prefeitura.
 - Não usar `Math.random()` no domínio da simulação.
+- Toda aleatoriedade de campanha usa uma das streams nomeadas de `CampaignRng`; consumir uma
+  stream por conveniência em outro domínio é violação de determinismo, mesmo que o resultado
+  pareça reproduzível.
+- `game/architecture.test.ts` é o gate executável contra `Math.random()` no Core de produção e
+  não pode ser removido, contornado ou limitado sem decisão registrada.
+- `worldSeed` é identidade persistente da campanha. Estado de RNG só pode ser restaurado por
+  snapshot validado e pertencente à mesma seed.
+- `HistoricalClock` é a única fonte de data da campanha: inicia em 01/01/1910, não ultrapassa
+  31/12/1959 e expõe as cadências diária, semanal, mensal e anual. Não derivar história de
+  `Date.now()`, relógio de parede ou contadores paralelos.
+- Interrupções de campanha entram em `InterruptionQueue` com ID estável e data fornecida por
+  `HistoricalClock`. Cada item elegível pode acionar auto-pause uma única vez; reconhecer e
+  persistir são operações distintas, e a persistência permanece responsabilidade do save.
 - Não hardcodear fundador, clube, rival, campeão ou resultado histórico.
 - Economia interna usa PPU; valores históricos precisam de fonte ou hipótese explícita.
 - Pessoas, terrenos, instalações, nomes, escudos e eventos relevantes preservam biografia e memória.
 - Associados, presidentes, identidade social e rivalidades são sistemas causais, não decoração ou bônus estáticos.
 - Apenas futebol integra o Alpha; população e regiões externas usam os níveis de abstração definidos no plano.
 - Save é versionado e alterações futuras não podem quebrá-lo silenciosamente.
+- O save nativo v22 valida campanha, decision log, dados espaciais e metadados da cidade antes de alterar o mundo. Migrações v19/v20/v21 usam defaults explícitos documentados em `docs/save-format.md`; saves anteriores sem metadados urbanos recebem `city: null`, sem inventar estado histórico.
+- Saves ilegíveis não podem ser sobrescritos pelo mundo transitório. Manter o original, o aviso e o bloqueio inclusive após HMR. Contadores de IDs removidos também são estado persistente.
+- Pacote reproduzível exige seed e decision log completo desde o dia zero. Histórico migrado incompleto não pode ser exportado como reprodução válida.
+- Execuções headless aplicam decisões no dia e ordem registrados e falham diante de decisão divergente; nunca ignorar divergência silenciosamente.
 
 As 25 regras canônicas completas permanecem no plano mestre e são obrigatórias mesmo quando não repetidas aqui.
 
@@ -59,6 +76,24 @@ As 25 regras canônicas completas permanecem no plano mestre e são obrigatória
 - Código, identificadores, comentários e documentação técnica junto ao código permanecem em inglês.
 - Documentos canônicos de produto, planos, contexto e pipeline podem permanecer em português.
 - Quando `CLAUDE.md` conflitar com o plano mestre ou este arquivo, registrar o conflito; a ordem de autoridade deste `AGENTS.md` prevalece para o projeto derivado.
+
+## Colaboração biagente
+
+Este projeto é implementado por dois agentes em paralelo: **Antigravity** (Google Deepmind) e **GPT** (OpenAI). A pasta `agents/` contém os documentos operacionais específicos desta colaboração.
+
+Leitura obrigatória adicional antes de qualquer trabalho:
+
+- `agents/README.md` — índice e fluxo mínimo de trabalho;
+- `agents/HANDSHAKE.md` — protocolo de turno; verificar quem está `EM ANDAMENTO` antes de começar;
+- `agents/VISUAL-AUDIT.md` — critério visual que deve ser demonstrado ao concluir cada pacote;
+- `agents/NEXT-STEPS.md` — briefing do próximo pacote com checagens prontas.
+
+Regras adicionais:
+
+- **Um pacote por vez, um agente por vez.** Nenhum agente inicia um pacote sem que o anterior esteja `CONCLUÍDO` com evidência em `docs/CONTEXTO.md`.
+- Ao iniciar, declarar turno em `agents/HANDSHAKE.md` antes de alterar qualquer arquivo de código.
+- Ao concluir, atualizar `agents/HANDSHAKE.md` e `agents/VISUAL-AUDIT.md` no mesmo conjunto de mudanças.
+- A ausência de evidência visual no jogo impede que um pacote seja declarado concluído, mesmo que os testes passem.
 
 ## Atualização obrigatória no mesmo trabalho
 

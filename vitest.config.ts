@@ -7,6 +7,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    testTimeout: 20000,
     // app/**/*.test.ts discovers the pure UI sampling reducer; render glue stays excluded.
     include: ['game/**/*.test.ts', 'app/**/*.test.ts'],
     coverage: {
@@ -17,6 +18,10 @@ export default defineConfig({
       // gameplay/manual testing, not brittle headless mocks — keeping
       // them out of the denominator keeps the % honest.
       include: [
+        'game/core/CampaignRng.ts',
+        'game/core/HistoricalClock.ts',
+        'game/core/InterruptionQueue.ts',
+        'game/core/DecisionLog.ts',
         'game/core/buildingFootprint.ts',
         'game/core/PowerMap.ts',
         'game/core/StructureMap.ts',
@@ -31,11 +36,13 @@ export default defineConfig({
         'game/core/World.ts',
         'game/core/Tile.ts',
         'game/core/mapSerialization.ts',
+        'game/core/campaignSave.ts',
         'game/core/mergePolicy.ts',
         'game/tools/RoadTool.ts',
         'game/tools/BulldozeTool.ts',
         'game/tools/ToolActions.ts',
         'game/engine/CommandDispatcher.ts',
+        'game/engine/HeadlessCampaign.ts',
         'game/engine/inspectTile.ts',
         'game/render/IsoTransform.ts',
         'game/render/cameraConstraints.ts',

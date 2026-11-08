@@ -1,26 +1,19 @@
-import type { MetadataRoute } from "next";
+import type { MetadataRoute } from 'next';
 
-// Next does not apply basePath to manifest contents (start_url / icon src),
-// so absolute URLs are used to keep it correct under /cimulity.
-// Required so the manifest route is emitted as a static file under output:export.
-export const dynamic = "force-static";
-
-const BASE = "https://zeikar.dev/cimulity/";
+// Next does not prefix URLs inside the generated manifest with basePath.
+export const dynamic = 'force-static';
+const BASE_PATH = process.env.NODE_ENV === 'production' ? '/cimulity' : '';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Cimulity",
-    short_name: "Cimulity",
-    description: "Open-source minimal city simulation game in the browser.",
-    start_url: BASE,
-    scope: BASE,
-    display: "standalone",
-    background_color: "#1b2027",
-    theme_color: "#1b2027",
-    icons: [
-      { src: `${BASE}icons/icon-192.png`, sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: `${BASE}icons/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: `${BASE}icons/icon-maskable-512.png`, sizes: "512x512", type: "image/png", purpose: "maskable" },
-    ],
+    name: 'Tradição Esporte Clube',
+    short_name: 'Tradição E.C.',
+    description: 'Tradição Esporte Clube — Uma campanha histórica procedural em Cidade de Minas (1910–1959).',
+    start_url: `${BASE_PATH}/`,
+    scope: `${BASE_PATH}/`,
+    display: 'standalone',
+    background_color: '#19201d',
+    theme_color: '#19201d',
+    icons: [{ src: `${BASE_PATH}/icon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
   };
 }

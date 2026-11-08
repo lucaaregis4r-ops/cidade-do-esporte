@@ -14,6 +14,9 @@ import { PowerPlantRenderer } from './PowerPlantRenderer';
 import { WaterTowerRenderer } from './WaterTowerRenderer';
 import { ServiceStructureRenderer } from './ServiceStructureRenderer';
 import { DecorationRenderer } from './DecorationRenderer';
+import { CityInfrastructureRenderer } from './CityInfrastructureRenderer';
+import { tileCenterToScreen } from './IsoTransform';
+import { ELEVATION_HEIGHT } from '../core/Terrain';
 import { tileCornerHeights } from './terrain/tileCornerHeights';
 import { mapWorldExtent, cameraBounds, centerOffset } from './cameraConstraints';
 import { visibleTileBounds, type VisibleTileBounds } from './viewportCulling';
@@ -38,9 +41,11 @@ export class PixiApp {
   private waterTowerRenderer: WaterTowerRenderer | null = null;
   private serviceStructureRenderer: ServiceStructureRenderer | null = null;
   private decorationRenderer: DecorationRenderer | null = null;
+  private cityInfrastructureRenderer: CityInfrastructureRenderer | null = null;
   private dataViewOverlay: DataViewOverlay | null = null;
   private terrainContainer: Container | null = null;
   private buildingContainer: Container | null = null;
+  private cityContainer: Container | null = null;
   private dataViewContainer: Container | null = null;
   private overlayContainer: Container | null = null;
   private selectionContainer: Container | null = null;
@@ -110,6 +115,9 @@ export class PixiApp {
     this.buildingContainer = new Container();
     this.buildingContainer.sortableChildren = true; // buildings sort within their own layer
 
+    // Campaign streets and landmarks are a map overlay above inherited trees/buildings.
+    this.cityContainer = new Container();
+
     // Data-view colored-diamond layer sits above buildings but below the utility
     // badge overlay so badges remain readable on top of the recolor.
     this.dataViewContainer = new Container();
@@ -123,6 +131,8 @@ export class PixiApp {
 
     this.app.stage.addChild(this.terrainContainer);
     this.app.stage.addChild(this.buildingContainer);
+    this.app.stage.addChild(this.cityContainer);
+    this.cityInfrastructureRenderer = new CityInfrastructureRenderer(this.cityContainer);
     this.app.stage.addChild(this.dataViewContainer);
     this.app.stage.addChild(this.overlayContainer);
     this.app.stage.addChild(this.selectionContainer);
@@ -148,6 +158,7 @@ export class PixiApp {
     this.centerCameraOnMap();
     const visibleBounds = this.computeVisibleBounds();
     this.tileRenderer.render(this.world, visibleBounds);
+    this.cityInfrastructureRenderer.render(this.world);
     this.powerPlantRenderer.render(this.world, visibleBounds);
     this.waterTowerRenderer.render(this.world, visibleBounds);
     this.serviceStructureRenderer.render(this.world, visibleBounds);
@@ -161,6 +172,7 @@ export class PixiApp {
       if (this.tileRenderer && this.world) {
         this.tileRenderer.render(this.world, visibleBounds);
       }
+      this.cityInfrastructureRenderer?.render(this.world);
       if (this.powerPlantRenderer && this.world) {
         this.powerPlantRenderer.render(this.world, visibleBounds);
       }
@@ -207,8 +219,35 @@ export class PixiApp {
   private centerCameraOnMap(): void {
     if (!this.camera || !this.app || !this.extent) return;
 
+    const center = this.world.getCityFoundation1910()?.center.coordinate;
+    if (center) {
+      this.focusCityTile(center);
+      return;
+    }
     const offset = centerOffset(this.extent, this.app.screen.width, this.app.screen.height, this.camera.getZoom());
     // pan-delta from current pos because Camera has no setPosition; clamping is centralized in pan.
+    const cur = this.camera.getPosition();
+    this.camera.pan(offset.x - cur.x, offset.y - cur.y);
+  }
+
+  /** Move a recorded city tile into the free map area beside the campaign summary. */
+  focusCampaignTile(tile: TileCoord): void {
+    if (!this.world.getMap().getTile(tile.x, tile.y)) return;
+    this.focusCityTile(tile);
+    this.notifyCameraUpdate();
+  }
+
+  private focusCityTile(tile: TileCoord): void {
+    if (!this.camera || !this.app) return;
+    const point = tileCenterToScreen(tile);
+    const height = this.world.getTerrain().getRenderHeight(tile.x, tile.y);
+    const focusX = this.app.screen.width >= 600
+      ? (this.app.screen.width + Math.min(340, this.app.screen.width * 0.45)) / 2
+      : this.app.screen.width / 2;
+    const offset = {
+      x: focusX - point.x * this.camera.getZoom(),
+      y: this.app.screen.height * 0.55 - (point.y - height * ELEVATION_HEIGHT) * this.camera.getZoom(),
+    };
     const cur = this.camera.getPosition();
     this.camera.pan(offset.x - cur.x, offset.y - cur.y);
   }
@@ -319,6 +358,7 @@ export class PixiApp {
     this.waterTowerRenderer?.destroy();
     this.serviceStructureRenderer?.destroy();
     this.decorationRenderer?.destroy();
+    this.cityInfrastructureRenderer?.destroy();
     this.dataViewOverlay?.destroy();
     this.utilityOverlay?.destroy();
     this.selectionRenderer?.destroy();
@@ -330,6 +370,7 @@ export class PixiApp {
     // deterministically, before the renderer context is torn down.
     this.terrainContainer?.destroy({ children: true });
     this.buildingContainer?.destroy({ children: true });
+    this.cityContainer?.destroy({ children: true });
     this.dataViewContainer?.destroy({ children: true });
     this.overlayContainer?.destroy({ children: true });
     this.selectionContainer?.destroy({ children: true });
@@ -350,11 +391,13 @@ export class PixiApp {
     this.waterTowerRenderer = null;
     this.serviceStructureRenderer = null;
     this.decorationRenderer = null;
+    this.cityInfrastructureRenderer = null;
     this.dataViewOverlay = null;
     this.utilityOverlay = null;
     this.selectionRenderer = null;
     this.terrainContainer = null;
     this.buildingContainer = null;
+    this.cityContainer = null;
     this.dataViewContainer = null;
     this.overlayContainer = null;
     this.selectionContainer = null;

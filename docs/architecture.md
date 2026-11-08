@@ -57,7 +57,7 @@ The codebase follows a strict layered architecture to maintain clean separation 
 │  - PixiApp (lifecycle + viewport culling orchestration)      │
 │  - Camera (pan/zoom transforms with bounds + zoom limits)    │
 │  - IsoTransform (coordinate conversion)                      │
-│  - TileRenderer, SelectionRenderer                          │
+│  - TileRenderer, SelectionRenderer, CityInfrastructureRenderer │
 │  - visuals/ registry: DiamondTileVisual, CubeBuildingVisual  │
 │  - viewportCulling (visible-tile bounds)                     │
 └─────────────────────────────────────────────────────────────┘
@@ -99,6 +99,9 @@ cimulity/
 │   │   └── devApi.ts             # window.__cimulity dev hooks
 │   │
 │   ├── core/                     # Core layer (state + simulation)
+│   │   ├── CampaignRng.ts        # worldSeed + eight independent serializable RNG streams
+│   │   ├── HistoricalClock.ts    # Gregorian 1910–1959 clock + cadence boundaries
+│   │   ├── InterruptionQueue.ts  # Deterministic FIFO + per-kind auto-pause policy
 │   │   ├── Tile.ts               # Tile data model
 │   │   ├── Building.ts           # Building model + BuildingMap registry
 │   │   ├── Map.ts                # 2D grid structure
@@ -192,7 +195,7 @@ Canvas Click → Camera.screenToWorld() → IsoTransform.screenToTile() → Map.
 `GameLoop` is a fixed-timestep accumulator pumped by `setInterval` at `tickMs / 4`:
 
 - **Tick rate**: `DEFAULT_TICK_MS` (1000ms) wall time = 1 sim tick at 1x speed
-- **Speed tiers**: 1x / 2x / 3x discrete multipliers (`KeyboardHandler` keys `1`/`2`/`3`); wall-clock elapsed is multiplied before accumulating
+- **Speed tiers**: 1x / 2x / 4x / 8x discrete multipliers (`KeyboardHandler` keys `1`/`2`/`3`/`4`); wall-clock elapsed is multiplied before accumulating
 - **Pause**: `Space` toggles; the interval keeps pumping but elapsed wall-clock is discarded so resuming doesn't credit a phantom burst
 - **Catch-up**: up to `MAX_CATCHUP_TICKS` (5) per advance to recover from tab-switch / GC pauses without spiraling
 
@@ -202,7 +205,7 @@ Each tick (`World.tick`, 1 tick = 1 day):
 2. Recomputes utility and coverage maps if dirty or on their own cadence: `PowerMap` (binary road-BFS reachability from power plants), `WaterMap` (same pattern for water towers), `ServiceCoverageMap` (police), `FireCoverageMap` (fire), `HospitalCoverageMap` (hospital), and `SchoolCoverageMap` (school) — all four coverage maps use `propagateServiceCoverage` + the same constants, each hard-coding its own source type, graded 0..255 intensity, MAX across stations via min-distance. These are not persisted. In the same step, `TrafficMap` recomputes if dirty, or force-recomputes every `TRAFFIC_INTERVAL` (16) ticks — traffic is a simulation input now (it feeds land value and happiness, see below), so there is no "unread, skip the cadence recompute" guard. A traffic recompute always force-refreshes `LaborMarketMap` first (see "Traffic & Labor Market" below), since traffic loads the labor market's matched commute flows. Traffic resolves before land value (step 3 reads the congestion snapshot produced here), and both maps are then frozen read-only for the rest of the tick.
 3. Recomputes land value if dirty, or unconditionally on `LAND_VALUE_INTERVAL` cadence (defense-in-depth). **Land value depends on coverage and traffic being fresh** (it reads the four coverage maps and the `TrafficMap` computed in step 2); a coverage or traffic change marks land value dirty, so all three are always in sync.
 4. Heals all `DIRT` tiles back to `GRASS`
-5. On a month-boundary day (`day % DAYS_PER_MONTH === 0`), settles a month of tax at the pre-growth population
+5. When `HistoricalClock` enters a new Gregorian month, settles tax for the completed month's actual day count at the pre-growth population
 6. On growth ticks (`tickCount % ZONE_GROWTH_INTERVAL === 0`), first runs an **abandonment sweep** over every building (added service-v8 / save v18 — `Building.abandoned: boolean`): if land value at the anchor no longer supports the building's level, it flips `abandoned = true`; if a previously-abandoned building's anchor land value now supports its level again, it flips back to `false`. The value it reads is the anchor's **uncongested** land value (`LandValueMap.getUncongestedValue`), not the congested `getValue` every growth gate below reads; why is documented once at the sweep in `World.tick`. Either flip freezes the building for the rest of this tick — recorded in a `frozenThisTick` set, not the live `abandoned` field, so a building that just re-occupied is still skipped by growth/merge below. That freeze skip sits after `age += 1`, so a derelict with road and power keeps aging and does not re-earn its cooldown from zero on recovery. Abandoned buildings are excluded from population, jobs, demand, and the labor market; the sweep runs before demand is (re)computed so this tick's growth pass already sees demand net of the buildings that just went derelict. The render layer shows a derelict tint with dark windows.
 
    The pass then walks zone tiles in two branches — **both require frontage road access**, though neither requires the tile itself to touch a road, and both skip any building frozen this tick:
@@ -250,7 +253,7 @@ Pipeline: `createRng(seed)` → `fbm2d` (raw noise) → `shapeHeightmap` (gamma 
 
 Default seed: `DEFAULT_NEWCITY_SEED = 0xC15A1E11`.
 
-Invocation rule: `new World(W, H)` and `World.reset({ regenerate: true })` invoke the generator. Save-hydration callsites (`worldStore.getWorld` when a save exists, `deserializeWorldInto` for native v19 saves) construct/reset with `{ regenerate: false }` so the generator does NOT run on load.
+Invocation rule: `new World(W, H)` and `World.reset({ regenerate: true })` generate the seed-derived 1910 city for maps at least 16×16. Smaller maps remain available for focused Core simulations. Save-hydration callsites construct/reset with `{ regenerate: false }`; native v23 validates the saved city and growth ledger, while v19–v21 set `city: null` and v22 rebases an empty growth ledger to its saved year.
 
 Failure fallback: `worldStore.getWorld` invokes `world.reset({ regenerate: true })` if `deserializeWorldInto` fails on a corrupt save, producing a fresh procedural map.
 
@@ -292,3 +295,43 @@ Types  → Types
 ```
 
 The same guard keeps React and Next inside App, keeps PixiJS inside Render, and rejects direct calls to explicit `World` mutators from Render, Input, or Tools. `GameSession` remains the composition root and `CommandDispatcher` remains the tool-command mutation boundary. Tests and declarations are excluded from the production dependency scan.
+
+## Campaign RNG
+
+`World` owns one `CampaignRng`, identified by a non-empty string `worldSeed`. The manager derives eight stateful uint32 streams (`city`, `population`, `club`, `football`, `politics`, `federation`, `events`, and `media`) with stable domain separation. Consuming one stream cannot advance any other stream.
+
+Snapshots contain the seed plus every stream state in a JSON-compatible shape. Restore validates the full snapshot before mutation and rejects state from another seed. World reset recreates all streams from the campaign seed; terrain and 1910 foundation generation consume only the `city` stream. A8/A9 persist this contract; v23 additionally stores B14 annual city growth.
+
+The production-source scanner in `game/architecture.test.ts` also rejects direct `Math.random()` calls anywhere in Core and reports the file and line. Its test contains an in-memory forbidden fixture, proving that the detector itself remains live while the real production tree stays clean.
+
+## Historical Clock
+
+`HistoricalClock` is the campaign's sole date authority. Elapsed day 0 is 1 January 1910; Gregorian month lengths and leap years apply, and advancement clamps at 31 December 1959. Each successful day returns daily, weekly, monthly, and annual boundary flags plus the length of a completed month. `World` delegates its date/elapsed-day API to this clock and uses the monthly boundary for accounting before growth.
+
+`GameLoop` remains a fixed-timestep wall-clock driver, but its canonical multipliers are now 1x, 2x, 4x, and 8x. Pause discards wall-clock elapsed as before. The clock and world state never read wall time; speed only controls how quickly deterministic one-day ticks are drained.
+
+### Annual city growth (B14)
+
+`World.tick` invokes one B8 `advanceCityGrowthYear` transition only when `HistoricalClock` emits its annual flag. The baseline land-value and pacing profile are declared design hypotheses in `game/core/city/campaignGrowthProfile.ts`; the HUD labels the model as uncalibrated. `CityInfrastructureRenderer` reads the immutable growth ledger and draws road extensions and parcel occupancy markers. This remains separate from B9 transformation, which is not part of B14.
+
+The campaign shell now reads seed, date, 1910 city counts, and growth totals through `GameSession`'s `TickUpdate`; React only formats these snapshots. `inspectTile` reads parcel development from the same `World` ledger, including its year and abstract increments. The normal toolbar and its `KeyboardHandler` instance expose inspection and clock controls; inherited municipal editing commands remain internal for compatibility with existing saves, tests, and replay. Inherited traffic, jobs, finance, and city simulation statistics are reachable under menus labeled as technical data, separate from the historical city readout. Public UI branding is Cidade dos Esportes; Cidade de Minas names the fictional city. Existing storage keys and the deployment base path remain stable.
+
+`PixiApp` mounts the city graphics in a dedicated container above inherited tree/building visuals, then aims the initial camera at the campaign's recorded 1910 center. On wide viewports the target sits in the open map area beside the left summary; legacy saves without city metadata retain map centering. This changes only camera and paint order, not Core state or save data.
+
+The B14 "latest occupation" control reads the last development's parcel ID in `GameSession`, resolves its saved parcel coordinate, and asks `PixiApp` to pan the camera. `CityInfrastructureRenderer` rings that same last development. This is a read-only navigation path; it does not advance the clock or recalculate growth.
+
+The campaign inspector docks on the right, displays saved city/parcel/growth fields first, and keeps inherited tile-service diagnostics collapsed. Opening a top menu closes the inspector. These are presentation choices in App; `inspectTile` remains the Engine read boundary.
+
+## Interruption Queue
+
+`InterruptionQueue` stores decision-worthy events in insertion order with stable IDs, immutable campaign dates, and the eight categories named by the product plan. `World` is the facade: it stamps events from `HistoricalClock`, owns the per-category auto-pause configuration, and acknowledges the FIFO head. `GameLoop` claims an eligible auto-pause trigger before another day is drained; the claim is one-shot even while the event remains unacknowledged, so resume cannot loop on the same item. `GameSession` mirrors the pause and current interruption to React. A8 persists queue entries, handled flags and configuration.
+
+### Campaign persistence (A8)
+
+`campaignSave.ts` defines v23 campaign state and explicit v19/v20/v21/v22 migrations. `mapSerialization.ts` stages validation of campaign, decision log, city metadata, B14 growth ledger and spatial state before resetting/hydrating the live world, without terrain generation. Building and structure next-ID counters survive deletion and reload. Derived spatial fields are invalidated/recomputed.
+
+`worldStore.ts` reads v23, v22, v21, v20, then v19, and writes only v23. A failed load retains the original bytes and blocks the fallback world's autosave; the warning and block survive module reloads on `globalThis`. `GameSession` forwards persistence notices, records successful tool decisions and exposes package export through the DEV API.
+
+### Replay and headless campaign (A9/A10)
+
+`DecisionLog` is Core state: it validates ordered successful tool decisions without importing Tools. `HeadlessCampaign` belongs to Engine, maps validated tool strings to `CommandDispatcher`, advances World to 1959 and emits the complete serialized result. This preserves the direction Engine → Core/Tools and avoids simulation logic in React or PixiJS. Contract and limits: `docs/reproducibility.md`.

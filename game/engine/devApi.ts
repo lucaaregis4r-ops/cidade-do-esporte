@@ -85,6 +85,8 @@ export interface DevApi {
      * Water is derived from elevation — no flat canvas contains water by default.
      */
     resetFlat(): void;
+    /** Return the canonical seed + decision log package for deterministic bug reproduction. */
+    exportReplayPackage(): string | null;
   };
 }
 
@@ -102,6 +104,8 @@ export interface DevApiHooks {
   regenerateTerrain: (seed?: number) => void;
   /** Triggers the full `GameSession.resetFlat()` flow. */
   resetFlat: () => void;
+  /** Build the canonical replay package from the live campaign. */
+  exportReplayPackage: () => string | null;
 }
 
 declare global {
@@ -244,6 +248,9 @@ export function installDevApi(world: World, pixiApp: PixiApp, hooks: DevApiHooks
       },
       resetFlat(): void {
         hooks.resetFlat();
+      },
+      exportReplayPackage(): string | null {
+        return hooks.exportReplayPackage();
       },
     },
   };
