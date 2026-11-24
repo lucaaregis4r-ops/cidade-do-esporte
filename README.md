@@ -10,6 +10,12 @@ O projeto concluiu a Etapa 0, as Macroetapas 1–5 e o **Alpha A — fundação 
 
 Abrir `/` em `npm run dev`. A tela principal mostra a seed da campanha, a data histórica, a cidade de 1910 e as ocupações anuais. **Ver última ocupação no mapa** encontra a parcela mais recente; clicar nela abre um painel lateral com distrito, parcela, uso e ano. A barra inferior controla pausa e velocidades de 1x a 8x. O menu **Etapas** indica o que cada Macroetapa 1–5 já demonstra. **Camadas** e **Base técnica** mantêm acessíveis os diagnósticos do motor herdado, rotulados como tal; ferramentas municipais não fazem parte dos controles normais da campanha. O nome público da aplicação é Cidade dos Esportes; Cidade de Minas continua sendo a cidade fictícia definida no plano. O caminho técnico `/cimulity` de publicação e as chaves de save mantêm compatibilidade com a base incorporada.
 
+## Captura de tela
+
+![Visão geral da campanha histórica de Cidade de Minas](docs/screenshots/city-overview.png)
+
+*Cena da campanha em Cidade de Minas, uma cidade fictícia.*
+
 ## Leitura inicial
 
 1. `AGENTS.md` — regras canônicas de trabalho.
